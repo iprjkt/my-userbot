@@ -104,6 +104,10 @@ async def get_stats_text(user_name):
     disk_used = disk.used / (1024**3)
     disk_free = disk.free / (1024**3)
     disk_pct = disk.percent
+
+    # Tambahin baris ini buat jaga-jaga kalau blok 1 atau 3 yang tereksekusi
+    kernel_ver = platform.release() or "Unknown Kernel"
+
     try:
         # 1. Coba nembus pertahanan Android (Buat HP yg di-root / chrootnya tembus)
         os_ver = subprocess.check_output("/system/bin/getprop ro.build.version.release 2>/dev/null", shell=True).decode().strip()
@@ -113,11 +117,11 @@ async def get_stats_text(user_name):
         distro = f"Android {os_ver}"
     except:
         try:
-            # 2. Kalo Android digembok chroot, kita gabungin nama Ubuntu + Kernel HP Asli lu!
-            # Ini tetep bakal jalan mulus kalo lu ntar pindah ke VPS AWS/Linode.
+            # 2. Kalo Android digembok chroot...
             ubuntu_name = subprocess.check_output("lsb_release -ds 2>/dev/null", shell=True).decode().strip().replace('"', '')
             raw_kernel = platform.release()
             distro = f"{ubuntu_name}"
+            # Di sini kernel_ver akan ditimpa dengan format yang lebih rapi
             kernel_ver = "-".join(raw_kernel.split("-")[:3])
         except:
             # 3. Fallback mentok aman sentosa
