@@ -237,7 +237,6 @@ async def handler_outgoing(event):
             await event.edit(f"**🚀 Speedtest Results (MB/s):**\n```{res}```")
         except Exception as e: await event.edit(f"❌ Speedtest Error: `{str(e)}`")
     elif t_l.startswith(".dump"):
-        # 1. Ambil URL pakai Regex (bebas dari error spasi/split)
         urls = re.findall(r'https?://[^\s]+', txt)
 
         if not urls:
@@ -249,17 +248,12 @@ async def handler_outgoing(event):
             )
         else:
             url = urls[0]
-
-            # 2. Hapus URL dari teks untuk mencari argumen partisi (jika ada)
             txt_without_url = txt.replace(url, "").strip()
             parts = txt_without_url.split()
-
-            # Jika ada kata setelah .dump selain URL, jadikan itu target partisi
             partitions = parts[1] if len(parts) > 1 else "boot,vendor_boot,init_boot"
 
             await event.edit(
                 f"⏳ **Memproses ekstraksi ROM...**\n"
-                f"🔗 **URL:** `{url[:40]}...`\n"
                 f"🎯 **Target Partisi:** `{partitions}`\n\n"
                 f"1️⃣ **Downloading ZIP...**"
             )
@@ -273,8 +267,8 @@ async def handler_outgoing(event):
             os.makedirs(task_dir, exist_ok=True)
 
             try:
-                # 1. Download ROM via aria2c
-                dl_cmd = f"aria2c -x 8 -s 8 -o rom.zip '{url}' -dir '{task_dir}'"
+                # 1. Download ROM (Urutan flag aria2c sudah diperbaiki!)
+                dl_cmd = f"aria2c -x 8 -s 8 -dir '{task_dir}' -o rom.zip '{url}'"
                 proc = await asyncio.create_subprocess_shell(dl_cmd)
                 await proc.communicate()
 
@@ -292,7 +286,6 @@ async def handler_outgoing(event):
                 proc = await asyncio.create_subprocess_shell(unzip_cmd)
                 await proc.communicate()
 
-                # Hapus ZIP ROM agar storage VPS 15GB tidak penuh
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
 
