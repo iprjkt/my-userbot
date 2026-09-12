@@ -236,7 +236,7 @@ async def handler_outgoing(event):
             res = subprocess.check_output([sys.executable, "-m", "speedtest", "--simple", "--bytes", "--secure"]).decode("utf-8")
             await event.edit(f"**🚀 Speedtest Results (MB/s):**\n```{res}```")
         except Exception as e: await event.edit(f"❌ Speedtest Error: `{str(e)}`")
-elif t_l.startswith(".dump"):
+    elif t_l.startswith(".dump"):
         # 1. Ambil URL pakai Regex (bebas dari error spasi/split)
         urls = re.findall(r'https?://[^\s]+', txt)
 
