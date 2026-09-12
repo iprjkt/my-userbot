@@ -2,8 +2,9 @@ from telethon import TelegramClient, events, functions, Button
 from telethon.tl import types
 from dotenv import load_dotenv
 import psutil, platform, os, sys, subprocess, asyncio, re, json, requests
-import warnings 
-import time 
+import shutil
+import warnings
+import time
 from datetime import datetime
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -78,6 +79,7 @@ HELP_TEXT = """
 **OWNER COMMANDS:**
 • `.info` - Cek spek VPS & Detail Storage
 • `.speedtest` - Tes kecepatan internet VPS (MB/s)
+• `.dump <link> [partisi]` - Extract payload.bin ROM (default: boot,vendor_boot,init_boot)
 • `.ascii [font] <teks>` - Ubah teks jadi ASCII art dengan font pilihan
 • `.afk <alasan>` - Mode AFK
 • `.approve` - Whitelist PM (Reply/ID)
@@ -105,11 +107,9 @@ async def get_stats_text(user_name):
     disk_free = disk.free / (1024**3)
     disk_pct = disk.percent
 
-    # Tambahin baris ini buat jaga-jaga kalau blok 1 atau 3 yang tereksekusi
     kernel_ver = platform.release() or "Unknown Kernel"
 
     try:
-        # 1. Coba nembus pertahanan Android (Buat HP yg di-root / chrootnya tembus)
         os_ver = subprocess.check_output("/system/bin/getprop ro.build.version.release 2>/dev/null", shell=True).decode().strip()
         if not os_ver:
             os_ver = subprocess.check_output("grep -m1 'ro.build.version.release=' /system/build.prop 2>/dev/null | cut -d= -f2", shell=True).decode().strip()
@@ -117,14 +117,11 @@ async def get_stats_text(user_name):
         distro = f"Android {os_ver}"
     except:
         try:
-            # 2. Kalo Android digembok chroot...
             ubuntu_name = subprocess.check_output("lsb_release -ds 2>/dev/null", shell=True).decode().strip().replace('"', '')
             raw_kernel = platform.release()
             distro = f"{ubuntu_name}"
-            # Di sini kernel_ver akan ditimpa dengan format yang lebih rapi
             kernel_ver = "-".join(raw_kernel.split("-")[:3])
         except:
-            # 3. Fallback mentok aman sentosa
             distro = f"{platform.system()} {platform.release()}"
     try:
         with open("/sys/firmware/devicetree/base/model", "r") as f:
@@ -167,21 +164,21 @@ async def handler_incoming(event):
     if not event.sender_id: return
     me = await client.get_me(); sid = int(event.sender_id); sid_s = str(sid); mid_s = str(me.id)
     txt = event.raw_text; t_l = txt.lower()
-    
-    is_white = (sid in whitelist_pm) 
+
+    is_white = (sid in whitelist_pm)
     is_muted = sid in TEMP_MUTE and time.time() < TEMP_MUTE[sid]
 
     if mid_s in afk_data and not (sid == me.id):
         reason = afk_data[mid_s].get('reason', 'KAMNTB')
         since_time = afk_data[mid_s].get('since', time.time())
         afk_duration = get_afk_time(since_time)
-        
+
         if event.is_private:
-            if is_white: 
+            if is_white:
                 return await event.reply(f"💤 **Bentar yaa lagi AFK alasan : {reason}**\n⏳ `(Sejak {afk_duration} yang lalu)`")
             else:
                 c = spam_tracker.get(sid_s, 0) + 1; spam_tracker[sid_s] = c; save_db(DB_SPAM, spam_tracker)
-                if c >= 5: 
+                if c >= 5:
                     await event.reply("🚫 **Limit chat PM tercapai. Lo diblock.**")
                     return await client(functions.contacts.BlockRequest(id=sid))
                 if not is_muted:
@@ -191,12 +188,12 @@ async def handler_incoming(event):
             if event.is_reply:
                 rep_msg = await event.get_reply_message()
                 if rep_msg and rep_msg.sender_id == me.id: is_reply_to_me = True
-            if event.mentioned or is_reply_to_me: 
+            if event.mentioned or is_reply_to_me:
                 return await event.reply(f"💤**Bentar yaa lagi AFK alasan : {reason}**\n⏳ `(Sejak {afk_duration} yang lalu)`")
 
     elif event.is_private and not (sid == me.id or is_white):
         c = spam_tracker.get(sid_s, 0) + 1; spam_tracker[sid_s] = c; save_db(DB_SPAM, spam_tracker)
-        if c >= 5: 
+        if c >= 5:
             await event.reply("🚫 **Limit chat PM tercapai. Lo diblock.**")
             return await client(functions.contacts.BlockRequest(id=sid))
         if not is_muted:
@@ -206,27 +203,24 @@ async def handler_incoming(event):
 async def handler_outgoing(event):
     txt, me = event.raw_text, await client.get_me()
     mid_s, sid_s, t_l = str(me.id), str(me.id), txt.lower()
-    
+
     if event.is_private and not txt.startswith("."):
-        TEMP_MUTE[event.chat_id] = time.time() + 300 
+        TEMP_MUTE[event.chat_id] = time.time() + 300
         if str(event.chat_id) in spam_tracker:
             spam_tracker[str(event.chat_id)] = 0; save_db(DB_SPAM, spam_tracker)
 
     if mid_s in afk_data and not t_l.startswith(".afk"):
-       
         reason = afk_data[mid_s].get('reason', 'KAMNTB')
         since_time = afk_data[mid_s].get('since', time.time())
         afk_duration = get_afk_time(since_time)
-        
+
         del afk_data[mid_s]
         save_db(DB_AFK, afk_data)
-        
-       
+
         await event.respond(f" **I'M BACK N1GGA!'**\n⏳ `(Kembali setelah {afk_duration} AFK - Alasan: {reason})`")
     if t_l.startswith(".afk"):
         r = txt[5:].strip()
-       
-        afk_data[mid_s] = {'reason': r if r else "KAMNTB", 'since': time.time()} 
+        afk_data[mid_s] = {'reason': r if r else "KAMNTB", 'since': time.time()}
         save_db(DB_AFK, afk_data)
         await event.edit(f"💤 **BYE gaiss AFK duluuu alasan : {afk_data[mid_s]['reason']}**")
     elif t_l == ".ping":
@@ -242,6 +236,91 @@ async def handler_outgoing(event):
             res = subprocess.check_output([sys.executable, "-m", "speedtest", "--simple", "--bytes", "--secure"]).decode("utf-8")
             await event.edit(f"**🚀 Speedtest Results (MB/s):**\n```{res}```")
         except Exception as e: await event.edit(f"❌ Speedtest Error: `{str(e)}`")
+    elif t_l.startswith(".dump"):
+        raw_args = txt.split(maxsplit=2)
+        if len(raw_args) < 2:
+            await event.edit(
+                "❌ **Format salah!**\n\n"
+                "**Penggunaan:**\n"
+                "• `.dump <link_rom>` *(default: boot, vendor_boot, init_boot)*\n"
+                "• `.dump <link_rom> boot,vendor_boot` *(custom partisi)*"
+            )
+        else:
+            url = raw_args[1]
+            partitions = raw_args[2] if len(raw_args) >= 3 else "boot,vendor_boot,init_boot"
+
+            await event.edit(
+                f"⏳ **Memproses ekstraksi ROM...**\n"
+                f"🎯 **Target Partisi:** `{partitions}`\n\n"
+                f"1️⃣ **Downloading ZIP...**"
+            )
+
+            task_id = str(event.id)
+            task_dir = os.path.join("./dumper_workspace", task_id)
+            out_dir = os.path.join(task_dir, "extracted")
+            zip_path = os.path.join(task_dir, "rom.zip")
+            payload_path = os.path.join(task_dir, "payload.bin")
+
+            os.makedirs(task_dir, exist_ok=True)
+
+            try:
+                # 1. Download ROM
+                dl_cmd = f"aria2c -x 8 -s 8 -o rom.zip '{url}' -dir '{task_dir}'"
+                proc = await asyncio.create_subprocess_shell(dl_cmd)
+                await proc.communicate()
+
+                if not os.path.exists(zip_path):
+                    raise Exception("Gagal mengunduh file ROM ZIP dari URL tersebut.")
+
+                await event.edit(
+                    f"⏳ **Memproses ekstraksi...**\n"
+                    f"🎯 **Target Partisi:** `{partitions}`\n\n"
+                    f"2️⃣ **Extracting payload.bin...**"
+                )
+
+                # 2. Extract payload.bin
+                unzip_cmd = f"unzip -p '{zip_path}' payload.bin > '{payload_path}'"
+                proc = await asyncio.create_subprocess_shell(unzip_cmd)
+                await proc.communicate()
+
+                # Hapus file ZIP ROM agar storage VPS 15GB tidak penuh
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+
+                if not os.path.exists(payload_path) or os.path.getsize(payload_path) == 0:
+                    raise Exception("payload.bin tidak ditemukan di dalam ZIP ROM ini.")
+
+                await event.edit(
+                    f"⏳ **Memproses ekstraksi...**\n"
+                    f"🎯 **Target Partisi:** `{partitions}`\n\n"
+                    f"3️⃣ **Dumping image ({partitions})...**"
+                )
+
+                # 3. Dump partisi pilihan
+                dump_cmd = f"payload-dumper-go -p '{partitions}' -o '{out_dir}' '{payload_path}'"
+                proc = await asyncio.create_subprocess_shell(dump_cmd)
+                await proc.communicate()
+
+                await event.edit("📤 **Mengirim hasil image ke Telegram...**")
+
+                extracted_files = [f for f in os.listdir(out_dir) if f.endswith(".img")] if os.path.exists(out_dir) else []
+
+                if not extracted_files:
+                    await event.edit(f"❌ **Gagal:** Partisi `{partitions}` tidak ditemukan di payload.bin.")
+                else:
+                    for f_name in extracted_files:
+                        f_path = os.path.join(out_dir, f_name)
+                        await client.send_file(
+                            event.chat_id,
+                            f_path,
+                            caption=f"✅ Extracted: `{f_name}`"
+                        )
+                    await event.delete()
+            except Exception as e:
+                await event.edit(f"❌ **Error Dump:** `{str(e)}`")
+            finally:
+                if os.path.exists(task_dir):
+                    shutil.rmtree(task_dir)
     elif t_l.startswith(".ascii"):
         raw = txt[len(".ascii"):].strip()
         if not raw:
@@ -263,7 +342,7 @@ async def handler_outgoing(event):
             tid = (await event.get_reply_message()).sender_id if event.is_reply else int(txt.split(" ", 1)[1])
             whitelist_pm.add(tid); save_db(DB_WHITE, whitelist_pm)
             if str(tid) in spam_tracker: del spam_tracker[str(tid)]; save_db(DB_SPAM, spam_tracker)
-            if tid in TEMP_MUTE: del TEMP_MUTE[tid] 
+            if tid in TEMP_MUTE: del TEMP_MUTE[tid]
             await event.edit(f"✅ User `{tid}` Whitelisted PM!")
         except: await event.edit("❌ Gagal.")
     elif t_l == ".list":
@@ -310,29 +389,48 @@ async def handler_outgoing(event):
                 await client.pin_message(event.chat_id, msg.id, notify=True)
             else:
                 await event.edit("❌ **Reply pesan yang mau di-pin, atau ketik `.pin <teks>` Ngab!**")
-        except Exception as e: 
+        except Exception as e:
             await event.edit(f"❌ **Gagal nge-pin:** `{e}`")
     elif t_l.startswith(".promote"):
-        target = (await event.get_reply_message()).sender_id if event.is_reply else (txt.split()[1] if len(txt.split()) > 1 else None)
-        user = int(target) if str(target).isdigit() else target
-        if user:
-            try:
+        try:
+            parts = event.raw_text.split(maxsplit=1)
+            target = None
+            custom_title = "Admin"
+            if event.is_reply:
+                target = (await event.get_reply_message()).sender_id
+                if len(parts) > 1:
+                    custom_title = parts[1]
+            else:
+                if len(parts) > 1:
+                    sub_parts = parts[1].split(maxsplit=1)
+                    target = sub_parts[0]
+                    target = int(target) if str(target).lstrip('-').isdigit() else target
+
+                    if len(sub_parts) > 1:
+                        custom_title = sub_parts[1]
+            if target:
+                custom_title = custom_title[:16]
+
                 await client.edit_admin(
-                    event.chat_id, user, 
-                    change_info=True, delete_messages=True, ban_users=True, 
-                    invite_users=True, pin_messages=True, manage_call=True, title="Admin"
+                    event.chat_id, target,
+                    change_info=True, delete_messages=True, ban_users=True,
+                    invite_users=True, pin_messages=True, manage_call=True,
+                    title=custom_title
                 )
-                await event.edit(f"👑 **{user} sekarang dapet pangkat Admin!**")
-            except Exception as e: await event.edit(f"❌ **Gagal promote:** `{e}`")
-        else: await event.edit("❌ **Reply chat atau tag username/ID orangnya Ngab!**")
+                await event.edit(f"👑 **Berhasil promote!** Target dapet pangkat dengan gelar: `{custom_title}`")
+            else:
+                await event.edit("❌ **Reply chat atau tag username/ID orangnya Ngab!**")
+
+        except Exception as e:
+            await event.edit(f"❌ **Gagal promote:** `{e}`")
     elif t_l.startswith(".demote"):
         target = (await event.get_reply_message()).sender_id if event.is_reply else (txt.split()[1] if len(txt.split()) > 1 else None)
         user = int(target) if str(target).isdigit() else target
         if user:
             try:
                 await client.edit_admin(
-                    event.chat_id, user, 
-                    change_info=False, delete_messages=False, ban_users=False, 
+                    event.chat_id, user,
+                    change_info=False, delete_messages=False, ban_users=False,
                     invite_users=False, pin_messages=False, manage_call=False
                 )
                 await event.edit(f"📉 **Pangkat {user} berhasil dicabut!** Balik jadi kroco.")
@@ -347,7 +445,7 @@ async def handler_outgoing(event):
             else:
                 await client.unpin_message(event.chat_id)
                 await event.edit("📌 **Pesan sematan terakhir berhasil di-unpin!**")
-        except Exception as e: 
+        except Exception as e:
             await event.edit(f"❌ **Gagal nge-unpin:** `{e}`")
     elif t_l.startswith(".add"):
         target = (await event.get_reply_message()).sender_id if event.is_reply else (txt.split()[1] if len(txt.split()) > 1 else None)
@@ -374,45 +472,13 @@ async def handler_outgoing(event):
                         await event.edit(f"➕ **Berhasil nyeret target ke grup basic!**")
                     except Exception as ex:
                         await event.edit(f"❌ **Gagal:** `{ex}`")
-        else: 
+        else:
             await event.edit("❌ **Reply chat atau tag username/ID orangnya Ngab!**")
-    elif t_l.startswith(".promote"):
-        try:
-            parts = event.raw_text.split(maxsplit=1)
-            target = None
-            custom_title = "Admin" # Gelar default kalo lu males ngetik
-            if event.is_reply:
-                target = (await event.get_reply_message()).sender_id
-                if len(parts) > 1:
-                    custom_title = parts[1]
-            else:
-                if len(parts) > 1:
-                    sub_parts = parts[1].split(maxsplit=1)
-                    target = sub_parts[0] 
-                    target = int(target) if str(target).lstrip('-').isdigit() else target
-                    
-                    if len(sub_parts) > 1:
-                        custom_title = sub_parts[1] 
-            if target:
-                custom_title = custom_title[:16]
-                
-                await client.edit_admin(
-                    event.chat_id, target, 
-                    change_info=True, delete_messages=True, ban_users=True, 
-                    invite_users=True, pin_messages=True, manage_call=True, 
-                    title=custom_title
-                )
-                await event.edit(f"👑 **Berhasil promote!** Target dapet pangkat dengan gelar: `{custom_title}`")
-            else:
-                await event.edit("❌ **Reply chat atau tag username/ID orangnya Ngab!**")
-                
-        except Exception as e: 
-            await event.edit(f"❌ **Gagal promote:** `{e}`")
     elif t_l == ".restart":
         for i in range(3, 0, -1): await event.edit(f"`♻️ Restarting in {i}s...` "); await asyncio.sleep(1)
         await event.edit("`♻️ Restarting now...` "); await client.disconnect()
         subprocess.Popen([sys.executable, sys.argv[0]], start_new_session=True); os._exit(0)
-    
+
 print("------------------------------------------------")
 print("------ AKASHA USERBOT IS READY TO USE SAR ------")
 print("------------------------------------------------")
