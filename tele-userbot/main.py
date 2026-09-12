@@ -83,8 +83,6 @@ HELP_TEXT = """
 • `.ascii [font] <teks>` - Ubah teks jadi ASCII art dengan font pilihan
 • `.afk <alasan>` - Mode AFK
 • `.approve` - Whitelist PM (Reply/ID)
-• `.permgroup` - Atur izin fitur untuk satu grup
-• `.perm` - Atur izin fitur user (Menu)
 • `.list` - Cek daftar user & izin
 • `.restart` - Muat ulang bot
 • `.help` - Munculin menu ini
@@ -146,8 +144,8 @@ async def get_stats_text(user_name):
     except: up = "Unknown"
     return (f"**AKASHA SYSTEM INFO** 🚀{n}{n}"
             f"👤 **User:** {t}{user_name}{t}{n}"
-            f"📱 **CPU:** {t}Ambatek helio gay67{t}{n}      {t} Gen 5{t}{n}"
-            f"🐧 **OS:** {t}Sigeon PEX OS{t}{n}"
+            f"📱 **CPU:** {t}Ambatek Helio Gay67{t}{n}      {t} Gen 5{t}{n}"
+            f"🐧 **OS:** {t}Netanyahu OS{t}{n}"
             f"⚙️ **Kernel:** {t}{kernel_ver}{t}{n}"
             f"⏱️ **Uptime:** {t}{up}{t}{n}{n}"
             f"💾 **RAM Capacity:**{n}"
