@@ -202,16 +202,24 @@ HELP_TEXT = """
 
 async def get_stats_text(user_name):
     n, t = chr(10), chr(96)
+
+    # Memori & Storage
     svmem = psutil.virtual_memory()
     ram_total = svmem.total / (1024**3)
     ram_used = svmem.used / (1024**3)
     ram_free = svmem.available / (1024**3)
     ram_pct = svmem.percent
+
     disk = psutil.disk_usage('/')
     disk_total = disk.total / (1024**3)
     disk_used = disk.used / (1024**3)
     disk_free = disk.free / (1024**3)
     disk_pct = disk.percent
+
+    # Network Traffic (Inbound & Outbound)
+    net_io = psutil.net_io_counters()
+    net_tx = net_io.bytes_sent / (1024**3)  # Outbound / Sent (Pakai kuota AWS)
+    net_rx = net_io.bytes_recv / (1024**3)  # Inbound / Recv (Gratis)
 
     kernel_ver = platform.release() or "Unknown Kernel"
 
@@ -229,33 +237,20 @@ async def get_stats_text(user_name):
             kernel_ver = "-".join(raw_kernel.split("-")[:3])
         except:
             distro = f"{platform.system()} {platform.release()}"
-    try:
-        with open("/sys/firmware/devicetree/base/model", "r") as f:
-            cpu = f.read().strip()
-    except:
-        try:
-            with open("/sys/devices/soc0/machine", "r") as f:
-                cpu = f.read().strip()
-        except:
-            try:
-                cpu = subprocess.check_output("grep -m1 'model name' /proc/cpuinfo | cut -d: -f2", shell=True).decode().strip()
-                if not cpu: raise Exception
-            except:
-                try:
-                    cpu = subprocess.check_output("grep -m1 'Hardware' /proc/cpuinfo | cut -d: -f2", shell=True).decode().strip()
-                    if not cpu: raise Exception
-                except:
-                    cpu = platform.processor() or "Unknown CPU"
+
     try:
         p = await asyncio.create_subprocess_shell("uptime -p", stdout=asyncio.subprocess.PIPE)
         out, _ = await p.communicate(); up = out.decode().replace("up ", "").strip()
     except: up = "Unknown"
+
     return (f"**AKASHA SYSTEM INFO** 🚀{n}{n}"
             f"👤 **User:** {t}{user_name}{t}{n}"
-            f"📱 **CPU:** {t}Ambatek Helio Gay67{t}{n}      {t} Gen 5{t}{n}"
-            f"🐧 **OS:** {t}Netanyahu OS{t}{n}"
+            f"📱 **CPU:** {t}Mediatek Helio {t}{n}      {t} G99-Ultra{t}{n}"
+            f"🐧 **OS:** {t}Windows 11 Pro 24H2{t}{n}"
             f"⚙️ **Kernel:** {t}{kernel_ver}{t}{n}"
             f"⏱️ **Uptime:** {t}{up}{t}{n}{n}"
+            f"  • Outbound (TX): {t}{net_tx:.2f} GB{t} *(AWS Limit: 100GB)*{n}"
+            f"  • Inbound (RX): {t}{net_rx:.2f} GB{t}{n}{n}"
             f"💾 **RAM Capacity:**{n}"
             f"  • Total: {t}{ram_total:.2f} GB{t}{n}"
             f"  • Used: {t}{ram_used:.2f} GB ({ram_pct}%){t}{n}"
@@ -333,9 +328,17 @@ async def handler_outgoing(event):
         start = datetime.now(); await event.edit("`Pinging...` ")
         await event.edit(f"**Pong !!**\n🚀 `Latency: {(datetime.now()-start).total_seconds()*1000:.2f} ms` ")
     elif t_l == ".info":
-        await event.edit("`Wait ygy ...` "); res = await get_stats_text(me.first_name)
-        if os.path.exists(IMAGE_INFO): await client.send_file(event.chat_id, IMAGE_INFO, caption=res); await event.delete()
-        else: await event.edit(res)
+        await event.edit("`Fetching info & profile photo... 🚀` ")
+        res = await get_stats_text(me.first_name)
+
+        pp_path = await client.download_profile_photo("me", file="temp_pp.jpg")
+
+        if pp_path and os.path.exists(pp_path):
+            await client.send_file(event.chat_id, pp_path, caption=res)
+            await event.delete()
+            os.remove(pp_path)
+        else:
+            await event.edit(res)
     elif t_l == ".speedtest":
         await event.edit("`Running Speedtest... 🚀` ")
         try:
