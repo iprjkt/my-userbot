@@ -296,7 +296,7 @@ async def handler_outgoing(event):
 
             os.makedirs(task_dir, exist_ok=True)
 
-            try
+            try:
                 dl_cmd = f"aria2c -x 8 -s 8 -d '{task_dir}' -o rom.zip '{url}'"
                 proc = await asyncio.create_subprocess_shell(dl_cmd)
                 await proc.communicate()
