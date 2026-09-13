@@ -23,6 +23,25 @@ DB_SPAM = "spam_tracker.json"
 
 TEMP_MUTE = {}
 
+import requests
+
+def upload_to_gofile(file_path):
+    res = requests.get("https://api.gofile.io/servers").json()
+    if res.get("status") != "ok" or not res["data"].get("servers"):
+        raise Exception("Gagal mendapatkan server dari Gofile.")
+
+    server = res["data"]["servers"][0]["name"]
+    upload_url = f"https://{server}.gofile.io/contents/uploadfile"
+
+    with open(file_path, "rb") as f:
+        files = {"file": f}
+        upload_res = requests.post(upload_url, files=files).json()
+
+    if upload_res.get("status") == "ok":
+        return upload_res["data"]["downloadPage"]
+    else:
+        raise Exception(f"Gofile Error: {upload_res}")
+
 def load_db(p, s=True):
     if os.path.exists(p):
         try:
@@ -277,8 +296,7 @@ async def handler_outgoing(event):
 
             os.makedirs(task_dir, exist_ok=True)
 
-            try:
-                # 1. Download ROM
+            try
                 dl_cmd = f"aria2c -x 8 -s 8 -d '{task_dir}' -o rom.zip '{url}'"
                 proc = await asyncio.create_subprocess_shell(dl_cmd)
                 await proc.communicate()
@@ -292,7 +310,6 @@ async def handler_outgoing(event):
                     f"2️⃣ **Extracting payload.bin...**"
                 )
 
-                # 2. Extract payload.bin
                 unzip_cmd = f"unzip -p '{zip_path}' payload.bin > '{payload_path}'"
                 proc = await asyncio.create_subprocess_shell(unzip_cmd)
                 await proc.communicate()
@@ -309,7 +326,6 @@ async def handler_outgoing(event):
                     f"3️⃣ **Dumping image ({partitions})...**"
                 )
 
-                # 3. Dump partisi
                 dump_cmd = f"payload-dumper-go {dump_flag} -o '{out_dir}' '{payload_path}'"
                 proc = await asyncio.create_subprocess_shell(dump_cmd)
                 await proc.communicate()
@@ -320,69 +336,22 @@ async def handler_outgoing(event):
                     await event.edit(f"❌ **Gagal:** Tidak ada file .img yang berhasil diekstrak.")
                 else:
                     total_files = len(extracted_files)
-                    MAX_SIZE = 1900 * 1024 * 1024  # Batas 1.9 GB biar aman di bawah limit Telegram 2 GB
+                    results_text = f"✅ **Ekstraksi Selesai!** ({total_files} file)\n\n"
 
                     for idx, f_name in enumerate(extracted_files, 1):
                         f_path = os.path.join(out_dir, f_name)
-                        f_size = os.path.getsize(f_path)
+                        f_size_mb = os.path.getsize(f_path) / (1024 * 1024)
 
-                        # 1. Cek jika file melebihi 1.9 GB, potong pakai Linux 'split'
-                        files_to_send = []
-                        if f_size > MAX_SIZE:
-                            size_gb = f_size / (1024 * 1024 * 1024)
-                            await event.edit(
-                                f"✂️ **File `{f_name}` terlalu besar ({size_gb:.2f} GB)!**\n"
-                                f"Memotong file jadi beberapa bagian < 1.9 GB..."
-                            )
-                            split_prefix = os.path.join(out_dir, f"{f_name}.part_")
-                            split_cmd = f"split -b 1900M '{f_path}' '{split_prefix}'"
-                            proc = await asyncio.create_subprocess_shell(split_cmd)
-                            await proc.communicate()
+                        await event.edit(
+                            f"📤 **Uploading ke Gofile...** ({idx}/{total_files})\n"
+                            f"📦 **File:** `{f_name}` ({f_size_mb:.1f} MB)\n"
+                            f"⚡ *Mengunggah via koneksi kilat VPS...*"
+                        )
 
-                            # Ambil semua file partisi hasil split
-                            files_to_send = sorted([
-                                os.path.join(out_dir, p) for p in os.listdir(out_dir)
-                                if p.startswith(f"{f_name}.part_")
-                            ])
-                        else:
-                            files_to_send = [f_path]
+                        download_link = await asyncio.to_thread(upload_to_gofile, f_path)
+                        results_text += f"🔹 **{f_name}** ({f_size_mb:.1f} MB)\n🔗 [Download Gofile]({download_link})\n\n"
 
-                        # 2. Kirim file (baik file utuh maupun potongan part)
-                        for sub_file in files_to_send:
-                            sub_name = os.path.basename(sub_file)
-                            last_update = 0
-
-                            async def upload_progress(current, total):
-                                nonlocal last_update
-                                now = time.time()
-                                if now - last_update >= 4 or current == total:
-                                    last_update = now
-                                    percentage = (current / total) * 100
-                                    curr_mb = current / (1024 * 1024)
-                                    tot_mb = total / (1024 * 1024)
-
-                                    try:
-                                        await event.edit(
-                                            f"📤 **Mengirim ke Telegram...** ({idx}/{total_files})\n"
-                                            f"📦 **File:** `{sub_name}`\n"
-                                            f"📊 **Progress:** `{percentage:.1f}%` ({curr_mb:.1f} / {tot_mb:.1f} MB)"
-                                        )
-                                    except Exception:
-                                        pass
-
-                            await client.send_file(
-                                event.chat_id,
-                                sub_file,
-                                caption=f"✅ Extracted: `{sub_name}`",
-                                part_size_kb=512,
-                                progress_callback=upload_progress
-                            )
-
-                            # Hapus file pecahan setelah terkirim agar storage VPS hemat
-                            if sub_file != f_path and os.path.exists(sub_file):
-                                os.remove(sub_file)
-
-                    await event.delete()
+                    await event.edit(results_text, link_preview=False)
             except Exception as e:
                 await event.edit(f"❌ **Error Dump:** `{str(e)}`")
             finally:
