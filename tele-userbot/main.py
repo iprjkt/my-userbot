@@ -251,12 +251,11 @@ async def handler_outgoing(event):
             txt_without_url = txt.replace(url, "").strip()
             parts = txt_without_url.split()
 
-            # Cek apakah user pake flag -all
             is_all = "-all" in txt_without_url.lower()
 
             if is_all:
                 partitions = "ALL PARTITIONS"
-                dump_flag = ""  # payload-dumper-go tanpa -p bakal dump semua
+                dump_flag = ""
             elif len(parts) > 1 and not parts[1].startswith("-"):
                 partitions = parts[1]
                 dump_flag = f"-p '{partitions}'"
@@ -279,7 +278,7 @@ async def handler_outgoing(event):
             os.makedirs(task_dir, exist_ok=True)
 
             try:
-                # 1. Download ROM via aria2c
+                # 1. Download ROM
                 dl_cmd = f"aria2c -x 8 -s 8 -d '{task_dir}' -o rom.zip '{url}'"
                 proc = await asyncio.create_subprocess_shell(dl_cmd)
                 await proc.communicate()
@@ -310,26 +309,49 @@ async def handler_outgoing(event):
                     f"3️⃣ **Dumping image ({partitions})...**"
                 )
 
-                # 3. Dump partisi (sesuai flag -all atau -p)
+                # 3. Dump partisi
                 dump_cmd = f"payload-dumper-go {dump_flag} -o '{out_dir}' '{payload_path}'"
                 proc = await asyncio.create_subprocess_shell(dump_cmd)
                 await proc.communicate()
-
-                await event.edit("📤 **Mengirim hasil image ke Telegram...**")
 
                 extracted_files = [f for f in os.listdir(out_dir) if f.endswith(".img")] if os.path.exists(out_dir) else []
 
                 if not extracted_files:
                     await event.edit(f"❌ **Gagal:** Tidak ada file .img yang berhasil diekstrak.")
                 else:
-                    for f_name in extracted_files:
+                    total_files = len(extracted_files)
+
+                    # TAMBAHAN PROGRESS CALLBACK DI SINI
+                    for idx, f_name in enumerate(extracted_files, 1):
                         f_path = os.path.join(out_dir, f_name)
+                        last_update = 0
+
+                        async def upload_progress(current, total):
+                            nonlocal last_update
+                            now = time.time()
+                            if now - last_update >= 4 or current == total:
+                                last_update = now
+                                percentage = (current / total) * 100
+                                curr_mb = current / (1024 * 1024)
+                                tot_mb = total / (1024 * 1024)
+
+                                try:
+                                    await event.edit(
+                                        f"📤 **Mengirim ke Telegram...** ({idx}/{total_files})\n"
+                                        f"📦 **File:** `{f_name}`\n"
+                                        f"📊 **Progress:** `{percentage:.1f}%` ({curr_mb:.1f} / {tot_mb:.1f} MB)"
+                                    )
+                                except Exception:
+                                    pass
+
                         await client.send_file(
                             event.chat_id,
                             f_path,
                             caption=f"✅ Extracted: `{f_name}`",
-                            part_size_kb=512
+                            part_size_kb=512,
+                            progress_callback=upload_progress
                         )
+
                     await event.delete()
             except Exception as e:
                 await event.edit(f"❌ **Error Dump:** `{str(e)}`")
