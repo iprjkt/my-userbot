@@ -320,37 +320,67 @@ async def handler_outgoing(event):
                     await event.edit(f"❌ **Gagal:** Tidak ada file .img yang berhasil diekstrak.")
                 else:
                     total_files = len(extracted_files)
+                    MAX_SIZE = 1900 * 1024 * 1024  # Batas 1.9 GB biar aman di bawah limit Telegram 2 GB
 
-                    # TAMBAHAN PROGRESS CALLBACK DI SINI
                     for idx, f_name in enumerate(extracted_files, 1):
                         f_path = os.path.join(out_dir, f_name)
-                        last_update = 0
+                        f_size = os.path.getsize(f_path)
 
-                        async def upload_progress(current, total):
-                            nonlocal last_update
-                            now = time.time()
-                            if now - last_update >= 4 or current == total:
-                                last_update = now
-                                percentage = (current / total) * 100
-                                curr_mb = current / (1024 * 1024)
-                                tot_mb = total / (1024 * 1024)
+                        # 1. Cek jika file melebihi 1.9 GB, potong pakai Linux 'split'
+                        files_to_send = []
+                        if f_size > MAX_SIZE:
+                            size_gb = f_size / (1024 * 1024 * 1024)
+                            await event.edit(
+                                f"✂️ **File `{f_name}` terlalu besar ({size_gb:.2f} GB)!**\n"
+                                f"Memotong file jadi beberapa bagian < 1.9 GB..."
+                            )
+                            split_prefix = os.path.join(out_dir, f"{f_name}.part_")
+                            split_cmd = f"split -b 1900M '{f_path}' '{split_prefix}'"
+                            proc = await asyncio.create_subprocess_shell(split_cmd)
+                            await proc.communicate()
 
-                                try:
-                                    await event.edit(
-                                        f"📤 **Mengirim ke Telegram...** ({idx}/{total_files})\n"
-                                        f"📦 **File:** `{f_name}`\n"
-                                        f"📊 **Progress:** `{percentage:.1f}%` ({curr_mb:.1f} / {tot_mb:.1f} MB)"
-                                    )
-                                except Exception:
-                                    pass
+                            # Ambil semua file partisi hasil split
+                            files_to_send = sorted([
+                                os.path.join(out_dir, p) for p in os.listdir(out_dir)
+                                if p.startswith(f"{f_name}.part_")
+                            ])
+                        else:
+                            files_to_send = [f_path]
 
-                        await client.send_file(
-                            event.chat_id,
-                            f_path,
-                            caption=f"✅ Extracted: `{f_name}`",
-                            part_size_kb=512,
-                            progress_callback=upload_progress
-                        )
+                        # 2. Kirim file (baik file utuh maupun potongan part)
+                        for sub_file in files_to_send:
+                            sub_name = os.path.basename(sub_file)
+                            last_update = 0
+
+                            async def upload_progress(current, total):
+                                nonlocal last_update
+                                now = time.time()
+                                if now - last_update >= 4 or current == total:
+                                    last_update = now
+                                    percentage = (current / total) * 100
+                                    curr_mb = current / (1024 * 1024)
+                                    tot_mb = total / (1024 * 1024)
+
+                                    try:
+                                        await event.edit(
+                                            f"📤 **Mengirim ke Telegram...** ({idx}/{total_files})\n"
+                                            f"📦 **File:** `{sub_name}`\n"
+                                            f"📊 **Progress:** `{percentage:.1f}%` ({curr_mb:.1f} / {tot_mb:.1f} MB)"
+                                        )
+                                    except Exception:
+                                        pass
+
+                            await client.send_file(
+                                event.chat_id,
+                                sub_file,
+                                caption=f"✅ Extracted: `{sub_name}`",
+                                part_size_kb=512,
+                                progress_callback=upload_progress
+                            )
+
+                            # Hapus file pecahan setelah terkirim agar storage VPS hemat
+                            if sub_file != f_path and os.path.exists(sub_file):
+                                os.remove(sub_file)
 
                     await event.delete()
             except Exception as e:
