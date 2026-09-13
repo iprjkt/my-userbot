@@ -25,7 +25,12 @@ TEMP_MUTE = {}
 
 import requests
 
-# 1. Helper untuk eksekusi shell command & tangkap error terminal
+def make_progress_bar(percent, length=10):
+    percent = max(0.0, min(100.0, percent))
+    filled = int(length * percent / 100)
+    bar = "█" * filled + "░" * (length - filled)
+    return f"[{bar}] {percent:.1f}%"
+
 async def run_shell(cmd):
     proc = await asyncio.create_subprocess_shell(
         cmd,
@@ -38,27 +43,86 @@ async def run_shell(cmd):
         raise Exception(f"Shell Failed [{cmd.split()[0]}]: {err_msg}")
     return stdout.decode().strip()
 
-# Helper Upload hemat RAM pakai cURL (streaming dari disk)
-async def upload_file_server(file_path):
-    # 1. Coba Upload ke Pixeldrain via cURL
+async def upload_file_server_with_progress(file_path, event, idx, total_files, f_name):
+    f_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+
+    # A. Coba Upload ke Pixeldrain dulu via cURL
     try:
-        cmd = f"curl -s -F 'file=@{file_path}' https://pixeldrain.com/api/file"
-        out = await run_shell(cmd)
-        data = json.loads(out)
+        cmd = f"curl -# -F 'file=@{file_path}' https://pixeldrain.com/api/file"
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        last_update = 0
+        while True:
+            chunk = await proc.stderr.read(128)
+            if not chunk:
+                break
+            text = chunk.decode('utf-8', errors='ignore')
+            matches = re.findall(r'(\d+(?:\.\d+)?)%', text)
+            if matches:
+                pct = float(matches[-1])
+                now = time.time()
+                if now - last_update >= 3 or pct >= 100:
+                    last_update = now
+                    p_bar = make_progress_bar(pct)
+                    curr_mb = (pct / 100) * f_size_mb
+                    try:
+                        await event.edit(
+                            f"📤 **Uploading ke Server...** ({idx}/{total_files})\n"
+                            f"📦 **File:** `{f_name}` ({f_size_mb:.1f} MB)\n"
+                            f"`{p_bar}` ({curr_mb:.1f} / {f_size_mb:.1f} MB)"
+                        )
+                    except Exception:
+                        pass
+
+        stdout, _ = await proc.communicate()
+        data = json.loads(stdout.decode().strip())
         if data.get("success"):
             return f"https://pixeldrain.com/u/{data['id']}"
     except Exception:
         pass
 
-    # 2. Fallback ke Gofile via cURL kalau Pixeldrain gagal
+    # B. Fallback ke Gofile via cURL jika Pixeldrain gagal
     try:
         srv_out = await run_shell("curl -s https://api.gofile.io/servers")
         srv_data = json.loads(srv_out)
         if srv_data.get("status") == "ok" and srv_data["data"].get("servers"):
             server = srv_data["data"]["servers"][0]["name"]
-            cmd = f"curl -s -F 'file=@{file_path}' https://{server}.gofile.io/contents/uploadfile"
-            up_out = await run_shell(cmd)
-            up_data = json.loads(up_out)
+            cmd = f"curl -# -F 'file=@{file_path}' https://{server}.gofile.io/contents/uploadfile"
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            last_update = 0
+            while True:
+                chunk = await proc.stderr.read(128)
+                if not chunk:
+                    break
+                text = chunk.decode('utf-8', errors='ignore')
+                matches = re.findall(r'(\d+(?:\.\d+)?)%', text)
+                if matches:
+                    pct = float(matches[-1])
+                    now = time.time()
+                    if now - last_update >= 3 or pct >= 100:
+                        last_update = now
+                        p_bar = make_progress_bar(pct)
+                        curr_mb = (pct / 100) * f_size_mb
+                        try:
+                            await event.edit(
+                                f"📤 **Uploading ke Gofile...** ({idx}/{total_files})\n"
+                                f"📦 **File:** `{f_name}` ({f_size_mb:.1f} MB)\n"
+                                f"`{p_bar}` ({curr_mb:.1f} / {f_size_mb:.1f} MB)"
+                            )
+                        except Exception:
+                            pass
+
+            stdout, _ = await proc.communicate()
+            up_data = json.loads(stdout.decode().strip())
             if up_data.get("status") == "ok":
                 return up_data["data"]["downloadPage"]
     except Exception:
@@ -321,9 +385,40 @@ async def handler_outgoing(event):
             os.makedirs(task_dir, exist_ok=True)
 
             try:
-                # 1. Download via aria2c
-                dl_cmd = f"aria2c -x 8 -s 8 -d '{task_dir}' -o rom.zip '{url}'"
-                await run_shell(dl_cmd)
+                # 1. Download ROM (Aria2c + Progress Bar)
+                dl_cmd = f"aria2c --summary-interval=2 -x 8 -s 8 -d '{task_dir}' -o rom.zip '{url}'"
+                proc = await asyncio.create_subprocess_shell(
+                    dl_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+
+                last_update = 0
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    line_str = line.decode('utf-8', errors='ignore')
+                    match = re.search(r'\((\d+)%\).*?DL:([^\s\]]+)', line_str)
+                    if match:
+                        pct = float(match.group(1))
+                        speed = match.group(2)
+                        now = time.time()
+                        if now - last_update >= 3:
+                            last_update = now
+                            p_bar = make_progress_bar(pct)
+                            try:
+                                await event.edit(
+                                    f"⏳ **Memproses ekstraksi ROM...**\n"
+                                    f"🎯 **Target Partisi:** `{partitions}`\n\n"
+                                    f"1️⃣ **Downloading ZIP...**\n"
+                                    f"`{p_bar}` | ⚡ `{speed}/s`"
+                                )
+                            except Exception:
+                                pass
+                await proc.wait()
+                if proc.returncode != 0:
+                    raise Exception("Gagal mengunduh file ROM ZIP.")
 
                 await event.edit(
                     f"⏳ **Memproses ekstraksi...**\n"
@@ -347,9 +442,34 @@ async def handler_outgoing(event):
                     f"3️⃣ **Dumping image ({partitions})...**"
                 )
 
-                # 3. Dump partisi
+                # 3. Dump Partisi (Payload Dumper + Progress Log)
                 dump_cmd = f"payload-dumper-go {dump_flag} -o '{out_dir}' '{payload_path}'"
-                await run_shell(dump_cmd)
+                proc = await asyncio.create_subprocess_shell(
+                    dump_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+
+                last_update = 0
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    text = line.decode('utf-8', errors='ignore').strip()
+                    if text:
+                        now = time.time()
+                        if now - last_update >= 3:
+                            last_update = now
+                            try:
+                                await event.edit(
+                                    f"⏳ **Memproses ekstraksi...**\n"
+                                    f"🎯 **Target Partisi:** `{partitions}`\n\n"
+                                    f"3️⃣ **Dumping image ({partitions})...**\n"
+                                    f"⚙️ `{text[:40]}`"
+                                )
+                            except Exception:
+                                pass
+                await proc.wait()
 
                 extracted_files = [f for f in os.listdir(out_dir) if f.endswith(".img")] if os.path.exists(out_dir) else []
 
@@ -359,22 +479,18 @@ async def handler_outgoing(event):
                     total_files = len(extracted_files)
                     results_text = f"✅ **Ekstraksi Selesai!** ({total_files} file)\n\n"
 
+                    # 4. Upload ke Server (dengan Progress Bar)
                     for idx, f_name in enumerate(extracted_files, 1):
                         f_path = os.path.join(out_dir, f_name)
                         f_size_mb = os.path.getsize(f_path) / (1024 * 1024)
 
-                        await event.edit(
-                            f"📤 **Uploading ke Server...** ({idx}/{total_files})\n"
-                            f"📦 **File:** `{f_name}` ({f_size_mb:.1f} MB)\n"
-                            f"⚡ *Mengunggah via koneksi kilat VPS...*"
+                        download_link = await upload_file_server_with_progress(
+                            f_path, event, idx, total_files, f_name
                         )
-
-                        download_link = await upload_file_server(f_path)
                         results_text += f"🔹 **{f_name}** ({f_size_mb:.1f} MB)\n🔗 [Download Link]({download_link})\n\n"
 
                     await event.edit(results_text, link_preview=False)
             except Exception as e:
-                # Format error menggunakan code block agar tidak merusak Markdown
                 await event.edit(f"❌ **Error Dump:**\n```{str(e)}```")
             finally:
                 if os.path.exists(task_dir):
