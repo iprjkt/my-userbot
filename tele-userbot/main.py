@@ -42,17 +42,17 @@ async def run_shell(cmd):
 def upload_file_server(file_path):
     # Coba Upload ke Pixeldrain dulu (Sangat stabil di VPS AWS)
     try:
-        url = "[https://pixeldrain.com/api/file](https://pixeldrain.com/api/file)"
+        url = "https://pixeldrain.com/api/file"
         with open(file_path, "rb") as f:
             res = requests.post(url, files={"file": f}, timeout=300)
         data = res.json()
         if data.get("success"):
-            return f"[https://pixeldrain.com/u/](https://pixeldrain.com/u/){data['id']}"
+            return f"https://pixeldrain.com/u/{data['id']}"
     except Exception:
         pass
 
     # Fallback ke Gofile kalau Pixeldrain bermasalah
-    res = requests.get("[https://api.gofile.io/servers](https://api.gofile.io/servers)").json()
+    res = requests.get("https://api.gofile.io/servers").json()
     if res.get("status") == "ok" and res["data"].get("servers"):
         server = res["data"]["servers"][0]["name"]
         upload_url = f"https://{server}.gofile.io/contents/uploadfile"
