@@ -79,7 +79,8 @@ HELP_TEXT = """
 **OWNER COMMANDS:**
 • `.info` - Cek spek VPS & Detail Storage
 • `.speedtest` - Tes kecepatan internet VPS (MB/s)
-• `.dump <link> [partisi]` - Extract payload.bin ROM (default: boot,vendor_boot,init_boot)
+• `.dump <link> [partisi]` - Extract payload.bin ROM
+  `.dump <link> -all`
 • `.ascii [font] <teks>` - Ubah teks jadi ASCII art dengan font pilihan
 • `.afk <alasan>` - Mode AFK
 • `.approve` - Whitelist PM (Reply/ID)
@@ -242,13 +243,26 @@ async def handler_outgoing(event):
                 "❌ **Link ROM tidak ditemukan!**\n\n"
                 "**Penggunaan:**\n"
                 "• `.dump <link_rom>` *(default: boot, vendor_boot, init_boot)*\n"
-                "• `.dump <link_rom> boot,vendor_boot` *(custom partisi)*"
+                "• `.dump <link_rom> boot,vendor_boot` *(custom partisi)*\n"
+                "• `.dump <link_rom> -all` *(extract SEMUA partisi)*"
             )
         else:
             url = urls[0]
             txt_without_url = txt.replace(url, "").strip()
             parts = txt_without_url.split()
-            partitions = parts[1] if len(parts) > 1 else "boot,vendor_boot,init_boot"
+
+            # Cek apakah user pake flag -all
+            is_all = "-all" in txt_without_url.lower()
+
+            if is_all:
+                partitions = "ALL PARTITIONS"
+                dump_flag = ""  # payload-dumper-go tanpa -p bakal dump semua
+            elif len(parts) > 1 and not parts[1].startswith("-"):
+                partitions = parts[1]
+                dump_flag = f"-p '{partitions}'"
+            else:
+                partitions = "boot,vendor_boot,init_boot"
+                dump_flag = f"-p '{partitions}'"
 
             await event.edit(
                 f"⏳ **Memproses ekstraksi ROM...**\n"
@@ -265,7 +279,7 @@ async def handler_outgoing(event):
             os.makedirs(task_dir, exist_ok=True)
 
             try:
-                # 1. Download ROM (Flag -d yang benar)
+                # 1. Download ROM via aria2c
                 dl_cmd = f"aria2c -x 8 -s 8 -d '{task_dir}' -o rom.zip '{url}'"
                 proc = await asyncio.create_subprocess_shell(dl_cmd)
                 await proc.communicate()
@@ -296,8 +310,8 @@ async def handler_outgoing(event):
                     f"3️⃣ **Dumping image ({partitions})...**"
                 )
 
-                # 3. Dump partisi pilihan
-                dump_cmd = f"payload-dumper-go -p '{partitions}' -o '{out_dir}' '{payload_path}'"
+                # 3. Dump partisi (sesuai flag -all atau -p)
+                dump_cmd = f"payload-dumper-go {dump_flag} -o '{out_dir}' '{payload_path}'"
                 proc = await asyncio.create_subprocess_shell(dump_cmd)
                 await proc.communicate()
 
@@ -306,14 +320,15 @@ async def handler_outgoing(event):
                 extracted_files = [f for f in os.listdir(out_dir) if f.endswith(".img")] if os.path.exists(out_dir) else []
 
                 if not extracted_files:
-                    await event.edit(f"❌ **Gagal:** Partisi `{partitions}` tidak ditemukan di payload.bin.")
+                    await event.edit(f"❌ **Gagal:** Tidak ada file .img yang berhasil diekstrak.")
                 else:
                     for f_name in extracted_files:
                         f_path = os.path.join(out_dir, f_name)
                         await client.send_file(
                             event.chat_id,
                             f_path,
-                            caption=f"✅ Extracted: `{f_name}`"
+                            caption=f"✅ Extracted: `{f_name}`",
+                            part_size_kb=512
                         )
                     await event.delete()
             except Exception as e:
