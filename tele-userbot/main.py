@@ -38,28 +38,31 @@ async def run_shell(cmd):
         raise Exception(f"Shell Failed [{cmd.split()[0]}]: {err_msg}")
     return stdout.decode().strip()
 
-# 2. Helper Upload (Pixeldrain utama, Gofile sebagai fallback)
-def upload_file_server(file_path):
-    # Coba Upload ke Pixeldrain dulu (Sangat stabil di VPS AWS)
+# Helper Upload hemat RAM pakai cURL (streaming dari disk)
+async def upload_file_server(file_path):
+    # 1. Coba Upload ke Pixeldrain via cURL
     try:
-        url = "https://pixeldrain.com/api/file"
-        with open(file_path, "rb") as f:
-            res = requests.post(url, files={"file": f}, timeout=300)
-        data = res.json()
+        cmd = f"curl -s -F 'file=@{file_path}' https://pixeldrain.com/api/file"
+        out = await run_shell(cmd)
+        data = json.loads(out)
         if data.get("success"):
             return f"https://pixeldrain.com/u/{data['id']}"
     except Exception:
         pass
 
-    # Fallback ke Gofile kalau Pixeldrain bermasalah
-    res = requests.get("https://api.gofile.io/servers").json()
-    if res.get("status") == "ok" and res["data"].get("servers"):
-        server = res["data"]["servers"][0]["name"]
-        upload_url = f"https://{server}.gofile.io/contents/uploadfile"
-        with open(file_path, "rb") as f:
-            upload_res = requests.post(upload_url, files={"file": f}, timeout=300).json()
-        if upload_res.get("status") == "ok":
-            return upload_res["data"]["downloadPage"]
+    # 2. Fallback ke Gofile via cURL kalau Pixeldrain gagal
+    try:
+        srv_out = await run_shell("curl -s https://api.gofile.io/servers")
+        srv_data = json.loads(srv_out)
+        if srv_data.get("status") == "ok" and srv_data["data"].get("servers"):
+            server = srv_data["data"]["servers"][0]["name"]
+            cmd = f"curl -s -F 'file=@{file_path}' https://{server}.gofile.io/contents/uploadfile"
+            up_out = await run_shell(cmd)
+            up_data = json.loads(up_out)
+            if up_data.get("status") == "ok":
+                return up_data["data"]["downloadPage"]
+    except Exception:
+        pass
 
     raise Exception("Gagal mengunggah file ke Pixeldrain maupun Gofile.")
 
@@ -366,7 +369,7 @@ async def handler_outgoing(event):
                             f"⚡ *Mengunggah via koneksi kilat VPS...*"
                         )
 
-                        download_link = await asyncio.to_thread(upload_file_server, f_path)
+                        download_link = await upload_file_server(f_path)
                         results_text += f"🔹 **{f_name}** ({f_size_mb:.1f} MB)\n🔗 [Download Link]({download_link})\n\n"
 
                     await event.edit(results_text, link_preview=False)
