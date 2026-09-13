@@ -25,22 +25,43 @@ TEMP_MUTE = {}
 
 import requests
 
-def upload_to_gofile(file_path):
-    res = requests.get("https://api.gofile.io/servers").json()
-    if res.get("status") != "ok" or not res["data"].get("servers"):
-        raise Exception("Gagal mendapatkan server dari Gofile.")
+# 1. Helper untuk eksekusi shell command & tangkap error terminal
+async def run_shell(cmd):
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        err_msg = stderr.decode().strip() or stdout.decode().strip() or f"Exit code {proc.returncode}"
+        raise Exception(f"Shell Failed [{cmd.split()[0]}]: {err_msg}")
+    return stdout.decode().strip()
 
-    server = res["data"]["servers"][0]["name"]
-    upload_url = f"https://{server}.gofile.io/contents/uploadfile"
+# 2. Helper Upload (Pixeldrain utama, Gofile sebagai fallback)
+def upload_file_server(file_path):
+    # Coba Upload ke Pixeldrain dulu (Sangat stabil di VPS AWS)
+    try:
+        url = "[https://pixeldrain.com/api/file](https://pixeldrain.com/api/file)"
+        with open(file_path, "rb") as f:
+            res = requests.post(url, files={"file": f}, timeout=300)
+        data = res.json()
+        if data.get("success"):
+            return f"[https://pixeldrain.com/u/](https://pixeldrain.com/u/){data['id']}"
+    except Exception:
+        pass
 
-    with open(file_path, "rb") as f:
-        files = {"file": f}
-        upload_res = requests.post(upload_url, files=files).json()
+    # Fallback ke Gofile kalau Pixeldrain bermasalah
+    res = requests.get("[https://api.gofile.io/servers](https://api.gofile.io/servers)").json()
+    if res.get("status") == "ok" and res["data"].get("servers"):
+        server = res["data"]["servers"][0]["name"]
+        upload_url = f"https://{server}.gofile.io/contents/uploadfile"
+        with open(file_path, "rb") as f:
+            upload_res = requests.post(upload_url, files={"file": f}, timeout=300).json()
+        if upload_res.get("status") == "ok":
+            return upload_res["data"]["downloadPage"]
 
-    if upload_res.get("status") == "ok":
-        return upload_res["data"]["downloadPage"]
-    else:
-        raise Exception(f"Gofile Error: {upload_res}")
+    raise Exception("Gagal mengunggah file ke Pixeldrain maupun Gofile.")
 
 def load_db(p, s=True):
     if os.path.exists(p):
@@ -198,7 +219,108 @@ async def handler_incoming(event):
                 c = spam_tracker.get(sid_s, 0) + 1; spam_tracker[sid_s] = c; save_db(DB_SPAM, spam_tracker)
                 if c >= 5:
                     await event.reply("🚫 **Limit chat PM tercapai. Lo diblock.**")
-                    return await client(functions.contacts.BlockRequest(id=sid))
+                    return await client(functions.contacts.BlockReelif t_l.startswith(".dump"):
+        urls = re.findall(r'https?://[^\s]+', txt)
+
+        if not urls:
+            await event.edit(
+                "❌ **Link ROM tidak ditemukan!**\n\n"
+                "**Penggunaan:**\n"
+                "• `.dump <link_rom>` *(default: boot, vendor_boot, init_boot)*\n"
+                "• `.dump <link_rom> boot,vendor_boot` *(custom partisi)*\n"
+                "• `.dump <link_rom> -all` *(extract SEMUA partisi)*"
+            )
+        else:
+            url = urls[0]
+            txt_without_url = txt.replace(url, "").strip()
+            parts = txt_without_url.split()
+
+            is_all = "-all" in txt_without_url.lower()
+
+            if is_all:
+                partitions = "ALL PARTITIONS"
+                dump_flag = ""
+            elif len(parts) > 1 and not parts[1].startswith("-"):
+                partitions = parts[1]
+                dump_flag = f"-p '{partitions}'"
+            else:
+                partitions = "boot,vendor_boot,init_boot"
+                dump_flag = f"-p '{partitions}'"
+
+            await event.edit(
+                f"⏳ **Memproses ekstraksi ROM...**\n"
+                f"🎯 **Target Partisi:** `{partitions}`\n\n"
+                f"1️⃣ **Downloading ZIP...**"
+            )
+
+            task_id = str(event.id)
+            task_dir = os.path.join("./dumper_workspace", task_id)
+            out_dir = os.path.join(task_dir, "extracted")
+            zip_path = os.path.join(task_dir, "rom.zip")
+            payload_path = os.path.join(task_dir, "payload.bin")
+
+            os.makedirs(task_dir, exist_ok=True)
+
+            try:
+                # 1. Download via aria2c
+                dl_cmd = f"aria2c -x 8 -s 8 -d '{task_dir}' -o rom.zip '{url}'"
+                await run_shell(dl_cmd)
+
+                await event.edit(
+                    f"⏳ **Memproses ekstraksi...**\n"
+                    f"🎯 **Target Partisi:** `{partitions}`\n\n"
+                    f"2️⃣ **Extracting payload.bin...**"
+                )
+
+                # 2. Extract payload.bin
+                unzip_cmd = f"unzip -p '{zip_path}' payload.bin > '{payload_path}'"
+                await run_shell(unzip_cmd)
+
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+
+                if not os.path.exists(payload_path) or os.path.getsize(payload_path) == 0:
+                    raise Exception("payload.bin tidak ditemukan di dalam ZIP ROM ini.")
+
+                await event.edit(
+                    f"⏳ **Memproses ekstraksi...**\n"
+                    f"🎯 **Target Partisi:** `{partitions}`\n\n"
+                    f"3️⃣ **Dumping image ({partitions})...**"
+                )
+
+                # 3. Dump partisi
+                dump_cmd = f"payload-dumper-go {dump_flag} -o '{out_dir}' '{payload_path}'"
+                await run_shell(dump_cmd)
+
+                extracted_files = [f for f in os.listdir(out_dir) if f.endswith(".img")] if os.path.exists(out_dir) else []
+
+                if not extracted_files:
+                    await event.edit(f"❌ **Gagal:** Tidak ada file .img yang berhasil diekstrak.")
+                else:
+                    total_files = len(extracted_files)
+                    results_text = f"✅ **Ekstraksi Selesai!** ({total_files} file)\n\n"
+
+                    for idx, f_name in enumerate(extracted_files, 1):
+                        f_path = os.path.join(out_dir, f_name)
+                        f_size_mb = os.path.getsize(f_path) / (1024 * 1024)
+
+                        await event.edit(
+                            f"📤 **Uploading ke Server...** ({idx}/{total_files})\n"
+                            f"📦 **File:** `{f_name}` ({f_size_mb:.1f} MB)\n"
+                            f"⚡ *Mengunggah via koneksi kilat VPS...*"
+                        )
+
+                        download_link = await asyncio.to_thread(upload_file_server, f_path)
+                        results_text += f"🔹 **{f_name}** ({f_size_mb:.1f} MB)\n🔗 [Download Link]({download_link})\n\n"
+
+                    await event.edit(results_text, link_preview=False)
+            except Exception as e:
+                # Format error menggunakan code block agar tidak merusak Markdown
+                await event.edit(f"❌ **Error Dump:**\n```{str(e)}```")
+            finally:
+                if os.path.exists(task_dir):
+                    shutil.rmtree(task_dir)
+quest(id=sid))
                 if not is_muted:
                     return await event.reply(f"🙏 **PM belum di-approve, jangan spam atau di blok tunggu di bales.**\n⏳ **AFK: {reason}** `(Sejak {afk_duration} yang lalu)` **({c}/5)**")
         else:
@@ -297,12 +419,9 @@ async def handler_outgoing(event):
             os.makedirs(task_dir, exist_ok=True)
 
             try:
+                # 1. Download via aria2c
                 dl_cmd = f"aria2c -x 8 -s 8 -d '{task_dir}' -o rom.zip '{url}'"
-                proc = await asyncio.create_subprocess_shell(dl_cmd)
-                await proc.communicate()
-
-                if not os.path.exists(zip_path):
-                    raise Exception("Gagal mengunduh file ROM ZIP dari URL tersebut.")
+                await run_shell(dl_cmd)
 
                 await event.edit(
                     f"⏳ **Memproses ekstraksi...**\n"
@@ -310,9 +429,9 @@ async def handler_outgoing(event):
                     f"2️⃣ **Extracting payload.bin...**"
                 )
 
+                # 2. Extract payload.bin
                 unzip_cmd = f"unzip -p '{zip_path}' payload.bin > '{payload_path}'"
-                proc = await asyncio.create_subprocess_shell(unzip_cmd)
-                await proc.communicate()
+                await run_shell(unzip_cmd)
 
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
@@ -326,9 +445,9 @@ async def handler_outgoing(event):
                     f"3️⃣ **Dumping image ({partitions})...**"
                 )
 
+                # 3. Dump partisi
                 dump_cmd = f"payload-dumper-go {dump_flag} -o '{out_dir}' '{payload_path}'"
-                proc = await asyncio.create_subprocess_shell(dump_cmd)
-                await proc.communicate()
+                await run_shell(dump_cmd)
 
                 extracted_files = [f for f in os.listdir(out_dir) if f.endswith(".img")] if os.path.exists(out_dir) else []
 
@@ -343,17 +462,18 @@ async def handler_outgoing(event):
                         f_size_mb = os.path.getsize(f_path) / (1024 * 1024)
 
                         await event.edit(
-                            f"📤 **Uploading ke Gofile...** ({idx}/{total_files})\n"
+                            f"📤 **Uploading ke Server...** ({idx}/{total_files})\n"
                             f"📦 **File:** `{f_name}` ({f_size_mb:.1f} MB)\n"
                             f"⚡ *Mengunggah via koneksi kilat VPS...*"
                         )
 
-                        download_link = await asyncio.to_thread(upload_to_gofile, f_path)
-                        results_text += f"🔹 **{f_name}** ({f_size_mb:.1f} MB)\n🔗 [Download Gofile]({download_link})\n\n"
+                        download_link = await asyncio.to_thread(upload_file_server, f_path)
+                        results_text += f"🔹 **{f_name}** ({f_size_mb:.1f} MB)\n🔗 [Download Link]({download_link})\n\n"
 
                     await event.edit(results_text, link_preview=False)
             except Exception as e:
-                await event.edit(f"❌ **Error Dump:** `{str(e)}`")
+                # Format error menggunakan code block agar tidak merusak Markdown
+                await event.edit(f"❌ **Error Dump:**\n```{str(e)}```")
             finally:
                 if os.path.exists(task_dir):
                     shutil.rmtree(task_dir)
