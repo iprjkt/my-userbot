@@ -676,7 +676,7 @@ async def handler_outgoing(event):
 
         await event.edit("⏳ **Mencuri stiker ke pack kamu...**")
 
-        # 1. Tentukan Emoji (Ambil dari argumen, emoji stiker asli, atau fallback ke 🤔)
+        # 1. Tentukan Emoji
         args = txt.split(maxsplit=1)
         sticker_emoji = "🤔"
         if len(args) > 1:
@@ -720,9 +720,10 @@ async def handler_outgoing(event):
             # 5. Tambahkan ke Sticker Pack (Auto Create / Auto Volume Baru)
             pack_num = 1
             added = False
+            username_str = f"_by_{me.username}" if me.username else ""
 
             while not added:
-                pack_short_name = f"kang_{me.id}_v{pack_num}"
+                pack_short_name = f"kang_{me.id}_v{pack_num}{username_str}"
                 pack_title = f"@{me.username or me.first_name}'s Kang Pack v{pack_num}"
 
                 try:
@@ -733,9 +734,10 @@ async def handler_outgoing(event):
                     ))
                     added = True
                 except Exception as e:
-                    err = str(e)
+                    err_msg = str(e).lower()
+
                     # Jika pack belum ada, buat pack baru
-                    if "STICKERSET_INVALID" in err or "StickersetInvalid" in err:
+                    if "invalid" in err_msg or "stickerset" in err_msg or "does not exist" in err_msg:
                         await client(CreateStickerSetRequest(
                             user_id=me.id,
                             title=pack_title,
@@ -743,8 +745,8 @@ async def handler_outgoing(event):
                             stickers=[sticker_item]
                         ))
                         added = True
-                    # Jika pack sudah penuh (limit 120 stiker), naikkan volume pack
-                    elif "STICKERS_TOO_MUCH" in err:
+                    # Jika pack sudah penuh (limit 120 stiker), naikkan volume pack (v2, v3, dst.)
+                    elif "too much" in err_msg or "full" in err_msg:
                         pack_num += 1
                     else:
                         raise e
