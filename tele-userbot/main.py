@@ -769,7 +769,6 @@ async def handler_outgoing(event):
             input_doc = InputDocument(id=doc.id, access_hash=doc.access_hash, file_reference=doc.file_reference)
             sticker_item = InputStickerSetItem(document=input_doc, emoji=sticker_emoji)
 
-            # 6. Tambahkan ke Sticker Pack (Pemisahan Pack Video & Statis)
             pack_num = 1
             added = False
             username_str = f"_by_{me.username}" if me.username else f"_by_id{me.id}"
@@ -789,17 +788,29 @@ async def handler_outgoing(event):
                 except Exception as e:
                     err_msg = str(e).lower()
                     if "invalid" in err_msg or "stickerset" in err_msg or "does not exist" in err_msg:
-                        # Buat pack baru (tambahkan videos=True jika stiker video)
-                        kwargs = {
-                            "user_id": me.id,
-                            "title": pack_title,
-                            "short_name": pack_short_name,
-                            "stickers": [sticker_item]
-                        }
+                        # Buat pack baru dengan fallback kompatibilitas versi Telethon
                         if is_video:
-                            kwargs["videos"] = True
-
-                        await client(CreateStickerSetRequest(**kwargs))
+                            try:
+                                await client(CreateStickerSetRequest(
+                                    user_id=me.id, title=pack_title, short_name=pack_short_name,
+                                    stickers=[sticker_item], videos=True
+                                ))
+                            except TypeError:
+                                try:
+                                    await client(CreateStickerSetRequest(
+                                        user_id=me.id, title=pack_title, short_name=pack_short_name,
+                                        stickers=[sticker_item], video=True
+                                    ))
+                                except TypeError:
+                                    await client(CreateStickerSetRequest(
+                                        user_id=me.id, title=pack_title, short_name=pack_short_name,
+                                        stickers=[sticker_item]
+                                    ))
+                        else:
+                            await client(CreateStickerSetRequest(
+                                user_id=me.id, title=pack_title, short_name=pack_short_name,
+                                stickers=[sticker_item]
+                            ))
                         added = True
                     elif "too much" in err_msg or "full" in err_msg:
                         pack_num += 1
