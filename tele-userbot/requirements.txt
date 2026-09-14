@@ -2,5 +2,6 @@ telethon
 python-dotenv
 psutil
 requests
+Pillow
 pyfiglet
 speedtest-cli
