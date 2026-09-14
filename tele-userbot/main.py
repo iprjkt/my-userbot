@@ -668,11 +668,11 @@ async def handler_outgoing(event):
         subprocess.Popen([sys.executable, sys.argv[0]], start_new_session=True); os._exit(0)
     elif t_l.startswith(".kang"):
         if not event.is_reply:
-            return await event.edit("❌ **Reply ke stiker atau foto/gambar yang mau dicuri Ngab!**")
+            return await event.edit("❌ **Reply ke stiker, foto, atau GIF yang mau dicuri Ngab!**")
 
         reply_msg = await event.get_reply_message()
-        if not (reply_msg.sticker or reply_msg.photo or (reply_msg.document and reply_msg.document.mime_type.startswith("image/"))):
-            return await event.edit("❌ **Pesan yang di-reply bukan stiker atau gambar!**")
+        if not reply_msg.media:
+            return await event.edit("❌ **Pesan yang di-reply tidak mengandung media/gambar/GIF!**")
 
         await event.edit("⏳ **Mencuri stiker ke pack kamu...**")
 
@@ -693,14 +693,44 @@ async def handler_outgoing(event):
             await client.download_media(reply_msg, file=bio)
             bio.seek(0)
 
-            # 3. Process & Resize ke 512x512 PNG pakai PIL
-            img = Image.open(bio)
-            img.thumbnail((512, 512))
-
+            # 3. Process & Resize ke 512x512 PNG
             output_bio = BytesIO()
-            img.save(output_bio, format="PNG")
-            output_bio.seek(0)
             output_bio.name = "sticker.png"
+
+            try:
+                # Coba baca pakai PIL dulu (Foto / Stiker Statis / GIF Animasi biasa)
+                img = Image.open(bio)
+                img.seek(0)  # Ambil frame 0 kalau animasi
+                img.thumbnail((512, 512))
+                img.save(output_bio, format="PNG")
+                output_bio.seek(0)
+            except Exception:
+                # Fallback pakai ffmpeg kalau PIL gagal (Telegram GIF mp4 / Video Sticker webm / TGS)
+                temp_in = os.path.join("./", f"temp_kang_{event.id}")
+                temp_out = os.path.join("./", f"temp_kang_{event.id}.png")
+
+                with open(temp_in, "wb") as f:
+                    f.write(bio.getvalue())
+
+                # Extract frame pertama pakai ffmpeg & resize ke 512x512
+                ffmpeg_cmd = f"ffmpeg -y -i '{temp_in}' -vframes 1 -vf 'scale=512:512:force_original_aspect_ratio=decrease' '{temp_out}'"
+                proc = await asyncio.create_subprocess_shell(
+                    ffmpeg_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                await proc.communicate()
+
+                if os.path.exists(temp_out):
+                    img = Image.open(temp_out)
+                    img.save(output_bio, format="PNG")
+                    output_bio.seek(0)
+                    os.remove(temp_out)
+                else:
+                    raise Exception("Gagal mengonversi GIF/video ke frame PNG stiker.")
+
+                if os.path.exists(temp_in):
+                    os.remove(temp_in)
 
             # 4. Upload sebagai dokumen stiker
             uploaded_file = await client.upload_file(output_bio)
@@ -717,7 +747,7 @@ async def handler_outgoing(event):
             input_doc = InputDocument(id=doc.id, access_hash=doc.access_hash, file_reference=doc.file_reference)
             sticker_item = InputStickerSetItem(document=input_doc, emoji=sticker_emoji)
 
-            # 5. Tambahkan ke Sticker Pack (Auto Create / Auto Volume Baru)
+            # 5. Tambahkan ke Sticker Pack
             pack_num = 1
             added = False
             username_str = f"_by_{me.username}" if me.username else ""
@@ -727,7 +757,6 @@ async def handler_outgoing(event):
                 pack_title = f"@{me.username or me.first_name}'s Kang Pack v{pack_num}"
 
                 try:
-                    # Coba tambahkan ke pack yang ada
                     await client(AddStickerToSetRequest(
                         stickerset=InputStickerSetShortName(short_name=pack_short_name),
                         sticker=sticker_item
@@ -735,8 +764,6 @@ async def handler_outgoing(event):
                     added = True
                 except Exception as e:
                     err_msg = str(e).lower()
-
-                    # Jika pack belum ada, buat pack baru
                     if "invalid" in err_msg or "stickerset" in err_msg or "does not exist" in err_msg:
                         await client(CreateStickerSetRequest(
                             user_id=me.id,
@@ -745,14 +772,13 @@ async def handler_outgoing(event):
                             stickers=[sticker_item]
                         ))
                         added = True
-                    # Jika pack sudah penuh (limit 120 stiker), naikkan volume pack (v2, v3, dst.)
                     elif "too much" in err_msg or "full" in err_msg:
                         pack_num += 1
                     else:
                         raise e
 
             await event.edit(
-                f"✅ **Stiker berhasil dicuri!** {sticker_emoji}\n"
+                f"✅ **Stiker/GIF berhasil dicuri!** {sticker_emoji}\n"
                 f"🔗 **Pack:** [Lihat Sticker Pack](https://t.me/addstickers/{pack_short_name})",
                 link_preview=False
             )
