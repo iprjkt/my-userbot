@@ -26,6 +26,7 @@ HELP_TEXT = """
 • `.approve` - Whitelist PM (Reply/ID/Username/PM)
 • `.disapprove` - Cabut Whitelist PM (Reply/ID/Username/PM)
 • `.restart` - Muat ulang bot
+• `.log [n/file/clear]` - Cek log sistem & debug
 • `.help` - Munculin menu ini
 • `.ban` - Ban member
 • `.unban` - Unban member
