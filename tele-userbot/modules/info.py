@@ -21,8 +21,10 @@ HELP_TEXT = """
   `.dump <link> -all`
 • `.ascii [font] <teks>` - Ubah teks jadi ASCII art dengan font pilihan
 • `.afk <alasan>` - Mode AFK
+• `.unafk` - Matikan mode AFK
 • `.kang <reply>` - Nyuri sticker
-• `.approve` - Whitelist PM (Reply/ID)
+• `.approve` - Whitelist PM (Reply/ID/Username/PM)
+• `.disapprove` - Cabut Whitelist PM (Reply/ID/Username/PM)
 • `.restart` - Muat ulang bot
 • `.help` - Munculin menu ini
 • `.ban` - Ban member
