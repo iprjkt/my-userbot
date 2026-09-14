@@ -669,13 +669,13 @@ async def handler_outgoing(event):
         subprocess.Popen([sys.executable, sys.argv[0]], start_new_session=True); os._exit(0)
     elif t_l.startswith(".kang"):
         if not event.is_reply:
-            return await event.edit("❌ **Reply ke stiker, foto, atau GIF yang mau dicuri Ngab!**")
+            return await event.edit("❌ **Reply ke stiker, foto, GIF, atau video yang mau dicuri Ngab!**")
 
         reply_msg = await event.get_reply_message()
         if not reply_msg.media:
-            return await event.edit("❌ **Pesan yang di-reply tidak mengandung media/gambar/GIF!**")
+            return await event.edit("❌ **Pesan yang di-reply tidak mengandung media!**")
 
-        await event.edit("⏳ **Mencuri stiker ke pack kamu...**")
+        await event.edit("⏳ **Memproses & mencuri stiker...**")
 
         # 1. Tentukan Emoji
         args = txt.split(maxsplit=1)
@@ -688,30 +688,42 @@ async def handler_outgoing(event):
                     sticker_emoji = attr.alt
                     break
 
+        # 2. Cek Jenis Media (Video/GIF vs Gambar Statis)
+        is_video = False
+        if reply_msg.video or reply_msg.gif or (reply_msg.document and reply_msg.document.mime_type.startswith("video/")):
+            is_video = True
+        elif reply_msg.sticker:
+            for attr in reply_msg.sticker.attributes:
+                if hasattr(attr, 'video') and attr.video:
+                    is_video = True
+                    break
+
         try:
-            # 2. Download media ke memori
+            # 3. Download media ke memori
             bio = BytesIO()
             await client.download_media(reply_msg, file=bio)
             bio.seek(0)
 
-            # 3. Process & Resize ke 512x512 PNG
             output_bio = BytesIO()
-            output_bio.name = "sticker.png"
 
-            try:
-                img = Image.open(bio)
-                img.seek(0)
-                img.thumbnail((512, 512))
-                img.save(output_bio, format="PNG")
-                output_bio.seek(0)
-            except Exception:
-                temp_in = os.path.join("./", f"temp_kang_{event.id}")
-                temp_out = os.path.join("./", f"temp_kang_{event.id}.png")
+            # 4. Processing Media Sesuai Jenisnya
+            if is_video:
+                # CONVERT TO WEBM (VP9, max 3s, 512x512, <=256KB)
+                output_bio.name = "sticker.webm"
+                mime_type = "video/webm"
+
+                temp_in = os.path.join("./", f"temp_kang_{event.id}.mp4")
+                temp_out = os.path.join("./", f"temp_kang_{event.id}.webm")
 
                 with open(temp_in, "wb") as f:
                     f.write(bio.getvalue())
 
-                ffmpeg_cmd = f"ffmpeg -y -i '{temp_in}' -vframes 1 -vf 'scale=512:512:force_original_aspect_ratio=decrease' '{temp_out}'"
+                # ffmpeg: potong max 3s, resize 512x512, encode VP9 tanpa audio
+                ffmpeg_cmd = (
+                    f"ffmpeg -y -i '{temp_in}' -t 3 "
+                    f"-vf 'scale=512:512:force_original_aspect_ratio=decrease' "
+                    f"-c:v libvpx-vp9 -crf 30 -b:v 256k -an '{temp_out}'"
+                )
                 proc = await asyncio.create_subprocess_shell(
                     ffmpeg_cmd,
                     stdout=asyncio.subprocess.PIPE,
@@ -720,25 +732,34 @@ async def handler_outgoing(event):
                 await proc.communicate()
 
                 if os.path.exists(temp_out):
-                    img = Image.open(temp_out)
-                    img.save(output_bio, format="PNG")
+                    with open(temp_out, "rb") as f:
+                        output_bio.write(f.read())
                     output_bio.seek(0)
                     os.remove(temp_out)
                 else:
-                    raise Exception("Gagal mengonversi GIF/video ke frame PNG stiker.")
+                    raise Exception("Gagal mengonversi video/GIF ke format WEBM stiker.")
 
                 if os.path.exists(temp_in):
                     os.remove(temp_in)
+            else:
+                # CONVERT TO PNG (Gambar Statis)
+                output_bio.name = "sticker.png"
+                mime_type = "image/png"
+                img = Image.open(bio)
+                img.seek(0)
+                img.thumbnail((512, 512))
+                img.save(output_bio, format="PNG")
+                output_bio.seek(0)
 
-            # 4. Upload sebagai dokumen STIKER RESMI (Ditambah DocumentAttributeSticker)
+            # 5. Upload dokumen stiker
             uploaded_file = await client.upload_file(output_bio)
             uploaded_media = await client(UploadMediaRequest(
                 peer="me",
                 media=InputMediaUploadedDocument(
                     file=uploaded_file,
-                    mime_type="image/png",
+                    mime_type=mime_type,
                     attributes=[
-                        DocumentAttributeFilename(file_name="sticker.png"),
+                        DocumentAttributeFilename(file_name=output_bio.name),
                         DocumentAttributeSticker(alt=sticker_emoji, stickerset=InputStickerSetEmpty())
                     ]
                 )
@@ -748,14 +769,16 @@ async def handler_outgoing(event):
             input_doc = InputDocument(id=doc.id, access_hash=doc.access_hash, file_reference=doc.file_reference)
             sticker_item = InputStickerSetItem(document=input_doc, emoji=sticker_emoji)
 
-            # 5. Tambahkan ke Sticker Pack
+            # 6. Tambahkan ke Sticker Pack (Pemisahan Pack Video & Statis)
             pack_num = 1
             added = False
             username_str = f"_by_{me.username}" if me.username else f"_by_id{me.id}"
+            prefix = "kang_vid" if is_video else "kang"
+            title_prefix = "Video Kang" if is_video else "Kang"
 
             while not added:
-                pack_short_name = f"kang_{me.id}_v{pack_num}{username_str}"
-                pack_title = f"@{me.username or me.first_name}'s Kang Pack v{pack_num}"
+                pack_short_name = f"{prefix}_{me.id}_v{pack_num}{username_str}"
+                pack_title = f"@{me.username or me.first_name}'s {title_prefix} Pack v{pack_num}"
 
                 try:
                     await client(AddStickerToSetRequest(
@@ -766,12 +789,17 @@ async def handler_outgoing(event):
                 except Exception as e:
                     err_msg = str(e).lower()
                     if "invalid" in err_msg or "stickerset" in err_msg or "does not exist" in err_msg:
-                        await client(CreateStickerSetRequest(
-                            user_id=me.id,
-                            title=pack_title,
-                            short_name=pack_short_name,
-                            stickers=[sticker_item]
-                        ))
+                        # Buat pack baru (tambahkan videos=True jika stiker video)
+                        kwargs = {
+                            "user_id": me.id,
+                            "title": pack_title,
+                            "short_name": pack_short_name,
+                            "stickers": [sticker_item]
+                        }
+                        if is_video:
+                            kwargs["videos"] = True
+
+                        await client(CreateStickerSetRequest(**kwargs))
                         added = True
                     elif "too much" in err_msg or "full" in err_msg:
                         pack_num += 1
@@ -779,7 +807,7 @@ async def handler_outgoing(event):
                         raise e
 
             await event.edit(
-                f"✅ **Stiker berhasil dicuri!** {sticker_emoji}\n"
+                f"✅ **Stiker ({'Video' if is_video else 'Gambar'}) berhasil dicuri!** {sticker_emoji}\n"
                 f"🔗 **Pack:** [Klik Untuk Buka Sticker Pack](https://t.me/addstickers/{pack_short_name})",
                 link_preview=False
             )
