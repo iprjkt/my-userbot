@@ -169,12 +169,29 @@ async def handle(event, client, txt, t_l):
         return True
 
     elif t_l == ".restart":
-        for i in range(3, 0, -1):
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        main_script = os.path.join(base_dir, "main.py")
+        restart_file = os.path.join(base_dir, ".restart_msg.json")
+
+        try:
+            import json
+            with open(restart_file, "w") as f:
+                json.dump({"chat_id": event.chat_id, "msg_id": event.id}, f)
+        except Exception:
+            pass
+
+        for i in range(2, 0, -1):
             await event.edit(f"`♻️ Restarting in {i}s...` ")
             await asyncio.sleep(1)
         await event.edit("`♻️ Restarting now...` ")
-        await client.disconnect()
-        subprocess.Popen([sys.executable, sys.argv[0]], start_new_session=True)
-        os._exit(0)
+
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=4)
+        except Exception:
+            pass
+
+        os.chdir(base_dir)
+        os.execv(sys.executable, [sys.executable, main_script] + sys.argv[1:])
 
     return False
+

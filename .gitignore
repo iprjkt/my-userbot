@@ -6,3 +6,4 @@ db/
 *.session-journal
 .env
 *.log
+.restart_msg.json

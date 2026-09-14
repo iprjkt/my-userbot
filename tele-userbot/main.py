@@ -85,6 +85,28 @@ async def handler_outgoing(event):
         logger.exception("Exception di handler_outgoing: %s", e)
 
 
+async def check_restart_message():
+    """Cek apakah bot baru saja di-restart via command .restart, lalu update status pesan."""
+    restart_file = os.path.join(BASE_DIR, ".restart_msg.json")
+    if os.path.exists(restart_file):
+        try:
+            import json
+            with open(restart_file, "r") as f:
+                rdata = json.load(f)
+            await client.edit_message(
+                rdata["chat_id"],
+                rdata["msg_id"],
+                "✅ **Akasha Userbot berhasil di-restart dan aktif kembali!** 🚀"
+            )
+        except Exception as e:
+            logger.warning("Gagal memperbarui pesan restart: %s", e)
+        finally:
+            try:
+                os.remove(restart_file)
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     logger.info("Starting Akasha Userbot...")
     print("------------------------------------------------")
@@ -92,4 +114,5 @@ if __name__ == "__main__":
     print("------------------------------------------------")
     client.start()
     logger.info("Akasha Userbot is connected and listening to events.")
+    client.loop.run_until_complete(check_restart_message())
     client.run_until_disconnected()

@@ -53,6 +53,10 @@ async def handle_incoming(event, client):
         afk_duration = get_afk_time(since_time)
 
         if event.is_private:
+            # Jika owner sedang aktif chat di PM ini (dalam 5 menit terakhir), jangan kirim auto-reply AFK
+            if is_muted:
+                return False
+
             if is_white:
                 # Whitelisted: Berikan info AFK dengan cooldown agar tidak spam
                 if now - AFK_REPLIED.get(sid, 0) > AFK_COOLDOWN:
@@ -63,15 +67,6 @@ async def handle_incoming(event, client):
                     )
                 return True
             else:
-                # Bukan whitelisted, tetapi sedang di-temp mute (owner baru saja chat)
-                if is_muted:
-                    if now - AFK_REPLIED.get(sid, 0) > AFK_COOLDOWN:
-                        AFK_REPLIED[sid] = now
-                        await event.reply(
-                            f"💤 **Bentar yaa lagi AFK alasan : {reason}**\n"
-                            f"⏳ `(Sejak {afk_duration} yang lalu)`"
-                        )
-                    return True
 
                 # PM Security / Spam tracker
                 c = spam_tracker.get(sid_s, 0) + 1
@@ -139,9 +134,9 @@ async def handle_incoming(event, client):
 
 
 async def handle_outgoing_return(event, client):
-    """Dipanggil dari handler_outgoing di main.py: cek apakah owner baru saja
-    balik dari AFK (kirim pesan chat normal saat status AFK masih aktif),
-    dan auto-mute sementara notifikasi spam-tracker saat owner balas PM manual."""
+    """Dipanggil dari handler_outgoing di main.py: auto-mute sementara
+    notifikasi spam-tracker saat owner balas PM manual.
+    Catatan: Mode AFK TIDAK akan mati saat kirim pesan; hanya mati jika mengirim command .unafk."""
     txt = event.raw_text
     if not txt:
         return
@@ -155,34 +150,6 @@ async def handle_outgoing_return(event, client):
         if cid_s in spam_tracker:
             spam_tracker[cid_s] = 0
             save_db(DB_SPAM, spam_tracker)
-
-    # JANGAN cancel AFK kalau pesan ini adalah command bot (diawali titik)
-    if txt.startswith("."):
-        return
-
-    me = await client.get_me()
-    mid_s = str(me.id)
-
-    if mid_s in afk_data:
-        since_time = afk_data[mid_s].get('since', now)
-        # Cegah pembatalan instan jika owner baru saja mengetik .afk kurang dari 3 detik lalu
-        if now - since_time < 3:
-            return
-
-        reason = afk_data[mid_s].get('reason', 'KAMNTB')
-        afk_duration = get_afk_time(since_time)
-
-        del afk_data[mid_s]
-        save_db(DB_AFK, afk_data)
-        AFK_REPLIED.clear()
-
-        try:
-            await event.respond(
-                f"✨ **I'M BACK!**\n"
-                f"⏳ `(Kembali setelah {afk_duration} AFK - Alasan: {reason})`"
-            )
-        except Exception:
-            pass
 
 
 async def handle(event, client, txt, t_l):
