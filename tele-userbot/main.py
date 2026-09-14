@@ -203,8 +203,8 @@ HELP_TEXT = """
   `.dump <link> -all`
 • `.ascii [font] <teks>` - Ubah teks jadi ASCII art dengan font pilihan
 • `.afk <alasan>` - Mode AFK
+• `.kang <reply>` - Nyuri sticker
 • `.approve` - Whitelist PM (Reply/ID)
-• `.list` - Cek daftar user & izin
 • `.restart` - Muat ulang bot
 • `.help` - Munculin menu ini
 • `.ban` - Ban member
