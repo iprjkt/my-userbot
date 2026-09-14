@@ -15,6 +15,8 @@ from telethon.tl.types import (
     InputStickerSetShortName,
     InputMediaUploadedDocument,
     DocumentAttributeFilename,
+    DocumentAttributeSticker,
+    InputStickerSetEmpty,
     InputDocument
 )
 
@@ -525,7 +527,6 @@ async def handler_outgoing(event):
                 text = parts[1] if len(parts) > 1 else ""
             art = text_to_ascii_art(text, font)
             await event.edit(f"```\n{art}\n```")
-    elif t_l.startswith(".approve"):
         try:
             tid = (await event.get_reply_message()).sender_id if event.is_reply else int(txt.split(" ", 1)[1])
             whitelist_pm.add(tid); save_db(DB_WHITE, whitelist_pm)
@@ -698,21 +699,18 @@ async def handler_outgoing(event):
             output_bio.name = "sticker.png"
 
             try:
-                # Coba baca pakai PIL dulu (Foto / Stiker Statis / GIF Animasi biasa)
                 img = Image.open(bio)
-                img.seek(0)  # Ambil frame 0 kalau animasi
+                img.seek(0)
                 img.thumbnail((512, 512))
                 img.save(output_bio, format="PNG")
                 output_bio.seek(0)
             except Exception:
-                # Fallback pakai ffmpeg kalau PIL gagal (Telegram GIF mp4 / Video Sticker webm / TGS)
                 temp_in = os.path.join("./", f"temp_kang_{event.id}")
                 temp_out = os.path.join("./", f"temp_kang_{event.id}.png")
 
                 with open(temp_in, "wb") as f:
                     f.write(bio.getvalue())
 
-                # Extract frame pertama pakai ffmpeg & resize ke 512x512
                 ffmpeg_cmd = f"ffmpeg -y -i '{temp_in}' -vframes 1 -vf 'scale=512:512:force_original_aspect_ratio=decrease' '{temp_out}'"
                 proc = await asyncio.create_subprocess_shell(
                     ffmpeg_cmd,
@@ -732,14 +730,17 @@ async def handler_outgoing(event):
                 if os.path.exists(temp_in):
                     os.remove(temp_in)
 
-            # 4. Upload sebagai dokumen stiker
+            # 4. Upload sebagai dokumen STIKER RESMI (Ditambah DocumentAttributeSticker)
             uploaded_file = await client.upload_file(output_bio)
             uploaded_media = await client(UploadMediaRequest(
                 peer="me",
                 media=InputMediaUploadedDocument(
                     file=uploaded_file,
                     mime_type="image/png",
-                    attributes=[DocumentAttributeFilename(file_name="sticker.png")]
+                    attributes=[
+                        DocumentAttributeFilename(file_name="sticker.png"),
+                        DocumentAttributeSticker(alt=sticker_emoji, stickerset=InputStickerSetEmpty())
+                    ]
                 )
             ))
 
@@ -750,7 +751,7 @@ async def handler_outgoing(event):
             # 5. Tambahkan ke Sticker Pack
             pack_num = 1
             added = False
-            username_str = f"_by_{me.username}" if me.username else ""
+            username_str = f"_by_{me.username}" if me.username else f"_by_id{me.id}"
 
             while not added:
                 pack_short_name = f"kang_{me.id}_v{pack_num}{username_str}"
@@ -778,8 +779,8 @@ async def handler_outgoing(event):
                         raise e
 
             await event.edit(
-                f"✅ **Stiker/GIF berhasil dicuri!** {sticker_emoji}\n"
-                f"🔗 **Pack:** [Lihat Sticker Pack](https://t.me/addstickers/{pack_short_name})",
+                f"✅ **Stiker berhasil dicuri!** {sticker_emoji}\n"
+                f"🔗 **Pack:** [Klik Untuk Buka Sticker Pack](https://t.me/addstickers/{pack_short_name})",
                 link_preview=False
             )
 
