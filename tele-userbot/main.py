@@ -6,6 +6,17 @@ import shutil
 import warnings
 import time
 from datetime import datetime
+from io import BytesIO
+from PIL import Image
+from telethon.tl.functions.stickers import AddStickerToSetRequest, CreateStickerSetRequest
+from telethon.tl.functions.messages import UploadMediaRequest
+from telethon.tl.types import (
+    InputStickerSetItem,
+    InputStickerSetShortName,
+    InputMediaUploadedDocument,
+    DocumentAttributeFilename,
+    InputDocument
+)
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -655,6 +666,97 @@ async def handler_outgoing(event):
         for i in range(3, 0, -1): await event.edit(f"`♻️ Restarting in {i}s...` "); await asyncio.sleep(1)
         await event.edit("`♻️ Restarting now...` "); await client.disconnect()
         subprocess.Popen([sys.executable, sys.argv[0]], start_new_session=True); os._exit(0)
+    elif t_l.startswith(".kang"):
+        if not event.is_reply:
+            return await event.edit("❌ **Reply ke stiker atau foto/gambar yang mau dicuri Ngab!**")
+
+        reply_msg = await event.get_reply_message()
+        if not (reply_msg.sticker or reply_msg.photo or (reply_msg.document and reply_msg.document.mime_type.startswith("image/"))):
+            return await event.edit("❌ **Pesan yang di-reply bukan stiker atau gambar!**")
+
+        await event.edit("⏳ **Mencuri stiker ke pack kamu...**")
+
+        # 1. Tentukan Emoji (Ambil dari argumen, emoji stiker asli, atau fallback ke 🤔)
+        args = txt.split(maxsplit=1)
+        sticker_emoji = "🤔"
+        if len(args) > 1:
+            sticker_emoji = args[1].strip()
+        elif reply_msg.sticker:
+            for attr in reply_msg.sticker.attributes:
+                if hasattr(attr, 'alt') and attr.alt:
+                    sticker_emoji = attr.alt
+                    break
+
+        try:
+            # 2. Download media ke memori
+            bio = BytesIO()
+            await client.download_media(reply_msg, file=bio)
+            bio.seek(0)
+
+            # 3. Process & Resize ke 512x512 PNG pakai PIL
+            img = Image.open(bio)
+            img.thumbnail((512, 512))
+
+            output_bio = BytesIO()
+            img.save(output_bio, format="PNG")
+            output_bio.seek(0)
+            output_bio.name = "sticker.png"
+
+            # 4. Upload sebagai dokumen stiker
+            uploaded_file = await client.upload_file(output_bio)
+            uploaded_media = await client(UploadMediaRequest(
+                peer="me",
+                media=InputMediaUploadedDocument(
+                    file=uploaded_file,
+                    mime_type="image/png",
+                    attributes=[DocumentAttributeFilename(file_name="sticker.png")]
+                )
+            ))
+
+            doc = uploaded_media.document
+            input_doc = InputDocument(id=doc.id, access_hash=doc.access_hash, file_reference=doc.file_reference)
+            sticker_item = InputStickerSetItem(document=input_doc, emoji=sticker_emoji)
+
+            # 5. Tambahkan ke Sticker Pack (Auto Create / Auto Volume Baru)
+            pack_num = 1
+            added = False
+
+            while not added:
+                pack_short_name = f"kang_{me.id}_v{pack_num}"
+                pack_title = f"@{me.username or me.first_name}'s Kang Pack v{pack_num}"
+
+                try:
+                    # Coba tambahkan ke pack yang ada
+                    await client(AddStickerToSetRequest(
+                        stickerset=InputStickerSetShortName(short_name=pack_short_name),
+                        sticker=sticker_item
+                    ))
+                    added = True
+                except Exception as e:
+                    err = str(e)
+                    # Jika pack belum ada, buat pack baru
+                    if "STICKERSET_INVALID" in err or "StickersetInvalid" in err:
+                        await client(CreateStickerSetRequest(
+                            user_id=me.id,
+                            title=pack_title,
+                            short_name=pack_short_name,
+                            stickers=[sticker_item]
+                        ))
+                        added = True
+                    # Jika pack sudah penuh (limit 120 stiker), naikkan volume pack
+                    elif "STICKERS_TOO_MUCH" in err:
+                        pack_num += 1
+                    else:
+                        raise e
+
+            await event.edit(
+                f"✅ **Stiker berhasil dicuri!** {sticker_emoji}\n"
+                f"🔗 **Pack:** [Lihat Sticker Pack](https://t.me/addstickers/{pack_short_name})",
+                link_preview=False
+            )
+
+        except Exception as e:
+            await event.edit(f"❌ **Gagal mencuri stiker:**\n```{str(e)}```")
 
 print("------------------------------------------------")
 print("------ AKASHA USERBOT IS READY TO USE SAR ------")
