@@ -12,7 +12,7 @@ import warnings
 from telethon import TelegramClient, events
 
 from helpers.db import api_id, api_hash
-from modules import admin, afk, ascii as ascii_mod, dumper, info, kang, approve, log as log_mod
+from modules import admin, afk, ascii as ascii_mod, dumper, info, kang, approve, log as log_mod, towa
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -41,7 +41,7 @@ client = TelegramClient('sesi_userbot', api_id, api_hash)
 
 # Urutan module dicoba untuk command outgoing (diawali titik).
 # Setiap handle() return True kalau command sudah match & ditangani -> stop di situ.
-OUTGOING_MODULES = [afk, log_mod, info, dumper, ascii_mod, approve, admin, kang]
+OUTGOING_MODULES = [afk, log_mod, info, dumper, ascii_mod, approve, admin, kang, towa]
 
 
 @client.on(events.NewMessage(incoming=True))

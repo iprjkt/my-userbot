@@ -22,7 +22,10 @@ HELP_TEXT = """
 • `.ascii [font] <teks>` - Ubah teks jadi ASCII art dengan font pilihan
 • `.afk <alasan>` - Mode AFK
 • `.unafk` - Matikan mode AFK
-• `.kang <reply>` - Nyuri sticker
+• `.kang [emoji] [pack]` - Curi stiker (foto di-convert ke video agar menyatu 1 pack)
+  `.kang -s [emoji] [pack]` - Mode stiker gambar statis (PNG)
+• `.towa [pack] | [author]` - Convert stiker/media Telegram ke stiker WhatsApp (.webp)
+• `.towapack [link/reply]` - Convert 1 pack stiker Telegram ke WhatsApp (.zip)
 • `.approve` - Whitelist PM (Reply/ID/Username/PM)
 • `.disapprove` - Cabut Whitelist PM (Reply/ID/Username/PM)
 • `.restart` - Muat ulang bot
