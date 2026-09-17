@@ -19,6 +19,7 @@ HELP_TEXT = """
 • `.speedtest` - Tes kecepatan internet VPS (MB/s)
 • `.dump <link> [partisi]` - Extract payload.bin ROM
   `.dump <link> -all`
+• `.unpack <link> <path>` - Unpack online partisi .img & ambil file/folder tertentu
 • `.ascii [font] <teks>` - Ubah teks jadi ASCII art dengan font pilihan
 • `.afk <alasan>` - Mode AFK
 • `.unafk` - Matikan mode AFK

@@ -1,7 +1,19 @@
+# Telegram Client & Performance
 telethon
+cryptg
+
+# Environment & Configuration
 python-dotenv
+
+# System Info & Monitoring
 psutil
+
+# Networking & HTTP
 requests
-Pillow
-pyfiglet
 speedtest-cli
+
+# Media & Image Processing (Stickers, Kang, WhatsApp)
+Pillow
+
+# Text Art & Fonts
+pyfiglet
