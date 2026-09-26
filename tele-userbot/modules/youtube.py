@@ -28,6 +28,48 @@ YOUTUBE_REGEX = re.compile(
 )
 
 
+def get_cookie_file() -> str | None:
+    """Cari file cookies.txt jika disediakan oleh pengguna untuk bypass bot verification."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        os.path.join(base_dir, "cookies.txt"),
+        os.path.join(base_dir, "youtube_cookies.txt"),
+        os.getenv("YT_COOKIES"),
+        os.getenv("YOUTUBE_COOKIES_PATH"),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c) and os.path.getsize(c) > 0:
+            return c
+    return None
+
+
+def get_base_ydl_opts(use_android_only: bool = False) -> dict:
+    """Konfigurasi dasar yt-dlp dengan extractor_args untuk bypass bot verification."""
+    cookie_file = get_cookie_file()
+
+    # Jika ada cookies, web client aman digunakan untuk kualitas penuh.
+    # Jika tidak ada cookies, prioritaskan client android & ios untuk menghindari bot detection.
+    if cookie_file:
+        clients = ["web", "android", "ios"]
+    elif use_android_only:
+        clients = ["android"]
+    else:
+        clients = ["android", "ios", "web"]
+
+    opts = {
+        "extractor_args": {
+            "youtube": {
+                "player_client": clients
+            }
+        },
+        "quiet": True,
+        "no_warnings": True,
+    }
+    if cookie_file:
+        opts["cookiefile"] = cookie_file
+    return opts
+
+
 def make_upload_progress(event, prefix="📤 **Mengunggah ke Telegram...**"):
     """Buat callback progress bar saat mengunggah file ke Telegram."""
     last_update = [0]
@@ -82,12 +124,11 @@ async def handle_search(event, txt):
     await event.edit(f"🔍 **Mencari `{query}` di YouTube...**")
 
     def _search():
-        ydl_opts = {
-            "quiet": True,
+        ydl_opts = get_base_ydl_opts()
+        ydl_opts.update({
             "skip_download": True,
             "extract_flat": True,
-            "no_warnings": True,
-        }
+        })
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(f"ytsearch5:{query}", download=False)
 
@@ -210,7 +251,8 @@ async def handle(event, client, txt, t_l):
         if is_audio_cmd:
             await event.edit("🔍 **Mengambil info audio YouTube...**")
 
-            ydl_opts = {
+            ydl_opts = get_base_ydl_opts()
+            ydl_opts.update({
                 "format": "bestaudio/best",
                 "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
                 "postprocessors": [{
@@ -220,15 +262,33 @@ async def handle(event, client, txt, t_l):
                 }],
                 "writethumbnail": True,
                 "progress_hooks": [_progress_hook],
-                "quiet": True,
-                "no_warnings": True,
-            }
+            })
 
-            def _dl_audio():
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            def _dl_audio(opts):
+                with yt_dlp.YoutubeDL(opts) as ydl:
                     return ydl.extract_info(target_url, download=True)
 
-            info = await asyncio.to_thread(_dl_audio)
+            try:
+                info = await asyncio.to_thread(_dl_audio, ydl_opts)
+            except Exception as e:
+                err_text = str(e).lower()
+                if "sign in" in err_text or "bot" in err_text:
+                    await event.edit("⏳ **Mencoba bypass bot verification (Android client)...**")
+                    fallback_opts = get_base_ydl_opts(use_android_only=True)
+                    fallback_opts.update({
+                        "format": "bestaudio/best",
+                        "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
+                        "postprocessors": [{
+                            "key": "FFmpegExtractAudio",
+                            "preferredcodec": "mp3",
+                            "preferredquality": "192",
+                        }],
+                        "writethumbnail": True,
+                        "progress_hooks": [_progress_hook],
+                    })
+                    info = await asyncio.to_thread(_dl_audio, fallback_opts)
+                else:
+                    raise
 
             title = info.get("title", "YouTube Audio")
             channel = info.get("uploader") or info.get("channel") or "Unknown Artist"
@@ -299,24 +359,39 @@ async def handle(event, client, txt, t_l):
         format_str = (
             f"bestvideo[ext=mp4][height<={max_height}]+bestaudio[ext=m4a]/"
             f"best[ext=mp4][height<={max_height}]/"
-            f"best[height<={max_height}]/best"
+            f"bestvideo*[height<={max_height}]+bestaudio/best"
         )
 
-        ydl_opts = {
+        ydl_opts = get_base_ydl_opts()
+        ydl_opts.update({
             "format": format_str,
             "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
             "merge_output_format": "mp4",
             "writethumbnail": True,
             "progress_hooks": [_progress_hook],
-            "quiet": True,
-            "no_warnings": True,
-        }
+        })
 
-        def _dl_video():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        def _dl_video(opts):
+            with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(target_url, download=True)
 
-        info = await asyncio.to_thread(_dl_video)
+        try:
+            info = await asyncio.to_thread(_dl_video, ydl_opts)
+        except Exception as e:
+            err_text = str(e).lower()
+            if "sign in" in err_text or "bot" in err_text:
+                await event.edit("⏳ **Mencoba bypass bot verification (Android client)...**")
+                fallback_opts = get_base_ydl_opts(use_android_only=True)
+                fallback_opts.update({
+                    "format": f"bestvideo*[height<={max_height}]+bestaudio/best[height<={max_height}]/best",
+                    "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
+                    "merge_output_format": "mp4",
+                    "writethumbnail": True,
+                    "progress_hooks": [_progress_hook],
+                })
+                info = await asyncio.to_thread(_dl_video, fallback_opts)
+            else:
+                raise
 
         title = info.get("title", "YouTube Video")
         channel = info.get("uploader") or info.get("channel") or "Unknown Channel"
@@ -326,7 +401,7 @@ async def handle(event, client, txt, t_l):
         height = info.get("height") or 720
         webpage_url = info.get("webpage_url") or target_url
 
-        # Cari file mp4 yang dihasilkan
+        # Cari file video yang dihasilkan
         video_file = None
         raw_thumb = None
         for f in os.listdir(task_dir):
@@ -335,8 +410,15 @@ async def handle(event, client, txt, t_l):
             elif f.lower().endswith((".webp", ".png", ".jpg", ".jpeg")):
                 raw_thumb = os.path.join(task_dir, f)
 
+        # Fallback jika ekstensi bukan .mp4 (.mkv atau .webm)
+        if not video_file:
+            for f in os.listdir(task_dir):
+                if f.endswith((".mkv", ".webm")):
+                    video_file = os.path.join(task_dir, f)
+                    break
+
         if not video_file or not os.path.exists(video_file):
-            raise Exception("Gagal mengunduh file video MP4.")
+            raise Exception("Gagal mengunduh file video YouTube.")
 
         thumb_path = convert_thumbnail_to_jpg(raw_thumb) if raw_thumb else None
         f_size_mb = os.path.getsize(video_file) / (1024 * 1024)
@@ -387,8 +469,19 @@ async def handle(event, client, txt, t_l):
         return True
 
     except Exception as e:
+        err_str = str(e)
         logger.exception("Error di modul YouTube: %s", e)
-        await event.edit(f"❌ **Error YouTube:**\n`{str(e)}`")
+        if "sign in" in err_str.lower() or "bot" in err_str.lower():
+            await event.edit(
+                "❌ **YouTube Bot Verification Terdeteksi!**\n\n"
+                "YouTube memblokir request dari IP VPS ini untuk video tersebut.\n\n"
+                "💡 **Solusi Ampuh:**\n"
+                "1. Ekspor cookies YouTube dari browser Anda (format Netscape `cookies.txt`).\n"
+                "2. Simpan file tersebut dengan nama `cookies.txt` di folder utama userbot.\n"
+                "Bot akan otomatis membaca cookies tersebut dan bebas dari limit bot!"
+            )
+        else:
+            await event.edit(f"❌ **Error YouTube:**\n`{err_str}`")
         return True
 
     finally:
