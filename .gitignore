@@ -13,3 +13,5 @@ tele-userbot/helpers/__pycache__
 tele-userbot/pm_whitelist.json 
 tele-userbot/spam_tracker.json 
 tele-userbot/afk_logs.json 
+tele-userbot/temp_media/
+*cookies.txt
