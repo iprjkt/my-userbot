@@ -27,6 +27,11 @@ HELP_TEXT = """
   `.kang -s [emoji] [pack]` - Mode stiker gambar statis (PNG)
 • `.towa [pack] | [author]` - Convert stiker/media Telegram ke stiker WhatsApp (.webp)
 • `.towapack [link/reply]` - Convert 1 pack stiker Telegram ke WhatsApp (.zip)
+• `.tt <link>` - Download video / slide foto TikTok (No Watermark)
+  `.tt -a <link>` - Download audio/musik TikTok (.mp3)
+• `.yt <link> [resolusi]` - Download video YouTube (.mp4)
+• `.yta <link>` - Download audio YouTube (.mp3)
+• `.yts <query>` - Cari video di YouTube
 • `.approve` - Whitelist PM (Reply/ID/Username/PM)
 • `.disapprove` - Cabut Whitelist PM (Reply/ID/Username/PM)
 • `.restart` - Muat ulang bot

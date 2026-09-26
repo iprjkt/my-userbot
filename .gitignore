@@ -8,3 +8,8 @@ db/
 .env
 *.log
 .restart_msg.json
+tele-userbot/modules/__pycache__
+tele-userbot/helpers/__pycache__  
+tele-userbot/pm_whitelist.json 
+tele-userbot/spam_tracker.json 
+tele-userbot/afk_logs.json 

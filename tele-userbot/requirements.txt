@@ -15,5 +15,8 @@ speedtest-cli
 # Media & Image Processing (Stickers, Kang, WhatsApp)
 Pillow
 
+# Video & Media Downloaders (YouTube, TikTok)
+yt-dlp
+
 # Text Art & Fonts
 pyfiglet

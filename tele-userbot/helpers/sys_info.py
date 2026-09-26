@@ -32,6 +32,34 @@ def make_progress_bar(percent, length=10):
     return f"[{bar}] {percent:.1f}%"
 
 
+def format_duration(seconds):
+    """Format durasi detik ke HH:MM:SS atau MM:SS."""
+    if not seconds:
+        return "00:00"
+    try:
+        seconds = int(float(seconds))
+    except (ValueError, TypeError):
+        return "00:00"
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def format_bytes(size):
+    """Format ukuran byte ke satuan yang mudah dibaca (KB, MB, GB)."""
+    if not size:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    i = 0
+    size = float(size)
+    while size >= 1024 and i < len(units) - 1:
+        size /= 1024
+        i += 1
+    return f"{size:.2f} {units[i]}"
+
+
 def get_afk_time(since):
     """Format durasi AFK jadi teks bahasa Indonesia (detik/menit/jam/hari)."""
     diff = int(time.time() - since)
