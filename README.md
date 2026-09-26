@@ -1,9 +1,3 @@
-# 🚀 Akasha Telegram Userbot
-
-Userbot Telegram pribadi berbasis Python dan Telethon dengan beragam fitur otomasi, tools sistem, downloader media, konverter stiker, dan utilitas Android.
-
----
-
 ## 🛠️ Panduan Instalasi & Setup
 
 ### 1. Prasyarat Paket Sistem
