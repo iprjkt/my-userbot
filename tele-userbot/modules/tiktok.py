@@ -34,36 +34,69 @@ HEADERS = {
 }
 
 
-async def fetch_tiktok_data(url: str) -> dict:
-    """Ambil data video/audio/slide TikTok dari TikWM API dengan async wrapper."""
-    def _req():
-        api_url = "https://www.tikwm.com/api/"
-        payload = {
-            "url": url,
-            "count": 12,
-            "cursor": 0,
-            "web": 1,
-            "hd": 1
-        }
-        res = requests.post(api_url, data=payload, headers=HEADERS, timeout=20)
-        return res.json()
+TIKTOK_LOCK = asyncio.Lock()
+LAST_REQUEST_TIME = [0.0]
 
-    data = await asyncio.to_thread(_req)
-    if data.get("code") == 0 and data.get("data"):
-        return data["data"]
 
-    # Fallback coba GET query
-    def _req_get():
-        api_url = f"https://www.tikwm.com/api/?url={url}&hd=1"
-        res = requests.get(api_url, headers=HEADERS, timeout=20)
-        return res.json()
+def resolve_tiktok_url(url: str) -> str:
+    """Follow redirects untuk link vt.tiktok.com, vm.tiktok.com, /t/."""
+    try:
+        if any(d in url for d in ['vt.tiktok.com', 'vm.tiktok.com', '/t/']):
+            r = requests.head(url, allow_redirects=True, timeout=8, headers=HEADERS)
+            if r.status_code in (200, 301, 302) and r.url:
+                return r.url
+    except Exception:
+        pass
+    return url
 
-    data_get = await asyncio.to_thread(_req_get)
-    if data_get.get("code") == 0 and data_get.get("data"):
-        return data_get["data"]
 
-    msg = data.get("msg") or data_get.get("msg") or "Gagal mengambil data dari TikTok"
-    raise Exception(f"TikWM Error: {msg}")
+async def fetch_tiktok_data(url: str, event=None, max_retries: int = 4) -> dict:
+    """Ambil data video/audio/slide TikTok dari TikWM API dengan proteksi rate-limit & auto-retry."""
+    clean_url = await asyncio.to_thread(resolve_tiktok_url, url)
+
+    last_error = "Unknown error"
+    for attempt in range(1, max_retries + 1):
+        # Proteksi rate-limit: jeda minimal 1.5 detik per request
+        async with TIKTOK_LOCK:
+            now = time.time()
+            elapsed = now - LAST_REQUEST_TIME[0]
+            if elapsed < 1.5:
+                await asyncio.sleep(1.5 - elapsed)
+            LAST_REQUEST_TIME[0] = time.time()
+
+        def _do_post():
+            try:
+                res = requests.post(
+                    "https://www.tikwm.com/api/",
+                    data={"url": clean_url, "count": 12, "cursor": 0, "web": 1, "hd": 1},
+                    headers=HEADERS,
+                    timeout=25
+                )
+                return res.json()
+            except Exception as e:
+                return {"code": -1, "msg": str(e)}
+
+        res_json = await asyncio.to_thread(_do_post)
+        if res_json.get("code") == 0 and res_json.get("data"):
+            return res_json["data"]
+
+        msg = res_json.get("msg", "")
+        last_error = msg or "Gagal mengambil data dari TikTok"
+
+        # Jika terkena rate limit (1 req/sec) atau server sibuk
+        if any(kw in msg.lower() for kw in ["limit", "second", "busy", "rate"]):
+            if event and attempt > 1:
+                try:
+                    await event.edit(f"⏳ **Menunggu antrean API TikTok ({attempt}/{max_retries})...**")
+                except Exception:
+                    pass
+            await asyncio.sleep(2.0)
+            continue
+        elif attempt < max_retries:
+            await asyncio.sleep(1.5)
+            continue
+
+    raise Exception(f"TikWM Error: {last_error}")
 
 
 def make_upload_progress(event, prefix="📤 **Mengunggah ke Telegram...**"):
@@ -133,7 +166,7 @@ async def handle(event, client, txt, t_l):
     await event.edit("🔍 **Mengambil informasi TikTok...**")
 
     try:
-        data = await fetch_tiktok_data(target_url)
+        data = await fetch_tiktok_data(target_url, event)
 
         title = (data.get("title") or "TikTok Post").strip()
         author = data.get("author") or {}
