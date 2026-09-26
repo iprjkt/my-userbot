@@ -14,11 +14,30 @@ from io import BytesIO
 from PIL import Image
 
 from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeVideo
+from telethon.errors import MediaCaptionTooLongError
 from helpers.sys_info import make_progress_bar, format_duration
 
 logger = logging.getLogger("AkashaUserbot.TikTok")
 
 TEMP_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "temp_media")
+
+
+def build_caption(header_title: str, prefix_icon: str, footer_info: str, max_total: int = 1000) -> str:
+    """
+    Bangun caption Telegram dengan membatasi panjang total <= max_total (default 1000).
+    Jika terlalu panjang, judul dipotong rapi dengan tanda '...' agar tidak melebihi limit 1024 karakter Telegram.
+    """
+    base_overhead = len(prefix_icon) + len(footer_info) + 12
+    available_title_len = max(30, max_total - base_overhead)
+
+    clean_title = (header_title or "").strip()
+    if len(clean_title) > available_title_len:
+        clean_title = clean_title[:available_title_len - 3].strip() + "..."
+
+    caption = f"{prefix_icon} **{clean_title}**\n\n{footer_info}".strip()
+    if len(caption) > 1024:
+        caption = caption[:1020] + "..."
+    return caption
 
 TIKTOK_REGEX = re.compile(
     r'(https?://(?:(?:www|vt|vm|m|t)\.)?tiktok\.com/[^\s]+|https?://[a-zA-Z0-9.-]+\.tiktok\.com/[^\s]+)',
@@ -225,31 +244,50 @@ async def handle(event, client, txt, t_l):
                 except Exception:
                     thumb_path = None
 
-            caption = (
-                f"🎵 **{music_title}**\n\n"
+            footer = (
                 f"👤 **Artis:** `{music_author}`\n"
                 f"⏱ **Durasi:** `{format_duration(duration)}`\n"
                 f"🔗 [TikTok Link]({target_url})"
             )
+            caption = build_caption(music_title, "🎵", footer)
 
             await event.edit("📤 **Mengunggah audio ke Telegram...**")
-            await client.send_file(
-                event.chat_id,
-                audio_path,
-                caption=caption,
-                thumb=thumb_path,
-                voice_note=False,
-                attributes=[
-                    DocumentAttributeAudio(
-                        duration=int(duration),
-                        voice=False,
-                        title=music_title,
-                        performer=music_author
-                    )
-                ],
-                reply_to=reply_to_id,
-                progress_callback=make_upload_progress(event, "📤 **Mengunggah audio ke Telegram...**")
-            )
+            try:
+                await client.send_file(
+                    event.chat_id,
+                    audio_path,
+                    caption=caption,
+                    thumb=thumb_path,
+                    voice_note=False,
+                    attributes=[
+                        DocumentAttributeAudio(
+                            duration=int(duration),
+                            voice=False,
+                            title=music_title,
+                            performer=music_author
+                        )
+                    ],
+                    reply_to=reply_to_id,
+                    progress_callback=make_upload_progress(event, "📤 **Mengunggah audio ke Telegram...**")
+                )
+            except MediaCaptionTooLongError:
+                short_cap = caption[:800] + "..."
+                await client.send_file(
+                    event.chat_id,
+                    audio_path,
+                    caption=short_cap,
+                    thumb=thumb_path,
+                    voice_note=False,
+                    attributes=[
+                        DocumentAttributeAudio(
+                            duration=int(duration),
+                            voice=False,
+                            title=music_title,
+                            performer=music_author
+                        )
+                    ],
+                    reply_to=reply_to_id
+                )
             await event.delete()
             return True
 
@@ -278,13 +316,13 @@ async def handle(event, client, txt, t_l):
             if not downloaded_images:
                 raise Exception("Gagal mengunduh gambar slide TikTok.")
 
-            caption = (
-                f"📸 **{title}**\n\n"
+            footer = (
                 f"👤 **Creator:** `{nickname}` (@{unique_id})\n"
                 f"📊 **Statistik:** ❤️ `{likes:,}` • 💬 `{comments:,}` • 🔁 `{shares:,}`\n"
                 f"🖼️ **Jumlah Slide:** `{len(downloaded_images)} foto`\n"
                 f"🔗 [TikTok Link]({target_url})"
             )
+            caption = build_caption(title, "📸", footer)
 
             await event.edit(f"📤 **Mengunggah {len(downloaded_images)} foto ke Telegram...**")
 
@@ -292,12 +330,21 @@ async def handle(event, client, txt, t_l):
             for i in range(0, len(downloaded_images), 10):
                 batch = downloaded_images[i:i + 10]
                 cap = caption if i == 0 else None
-                await client.send_file(
-                    event.chat_id,
-                    batch,
-                    caption=cap,
-                    reply_to=reply_to_id
-                )
+                try:
+                    await client.send_file(
+                        event.chat_id,
+                        batch,
+                        caption=cap,
+                        reply_to=reply_to_id
+                    )
+                except MediaCaptionTooLongError:
+                    short_cap = cap[:800] + "..." if cap else None
+                    await client.send_file(
+                        event.chat_id,
+                        batch,
+                        caption=short_cap,
+                        reply_to=reply_to_id
+                    )
 
             # Jika ada musik latar di slide foto, kirimkan juga
             if music_url:
@@ -377,25 +424,36 @@ async def handle(event, client, txt, t_l):
             except Exception:
                 thumb_path = None
 
-        caption = (
-            f"🎬 **{title}**\n\n"
+        footer = (
             f"👤 **Creator:** `{nickname}` (@{unique_id})\n"
             f"🎵 **Musik:** `{music_title}` - `{music_author}`\n"
             f"📊 **Statistik:** ❤️ `{likes:,}` • 💬 `{comments:,}` • 🔁 `{shares:,}`\n"
             f"⏱ **Durasi:** `{format_duration(duration)}`\n"
             f"🔗 [TikTok Link]({target_url})"
         )
+        caption = build_caption(title, "🎬", footer)
 
         await event.edit("📤 **Mengunggah video ke Telegram...**")
-        await client.send_file(
-            event.chat_id,
-            video_path,
-            caption=caption,
-            thumb=thumb_path,
-            supports_streaming=True,
-            reply_to=reply_to_id,
-            progress_callback=make_upload_progress(event, "📤 **Mengunggah video ke Telegram...**")
-        )
+        try:
+            await client.send_file(
+                event.chat_id,
+                video_path,
+                caption=caption,
+                thumb=thumb_path,
+                supports_streaming=True,
+                reply_to=reply_to_id,
+                progress_callback=make_upload_progress(event, "📤 **Mengunggah video ke Telegram...**")
+            )
+        except MediaCaptionTooLongError:
+            short_cap = caption[:800] + "..."
+            await client.send_file(
+                event.chat_id,
+                video_path,
+                caption=short_cap,
+                thumb=thumb_path,
+                supports_streaming=True,
+                reply_to=reply_to_id
+            )
         await event.delete()
         return True
 

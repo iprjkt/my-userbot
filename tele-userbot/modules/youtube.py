@@ -15,12 +15,31 @@ import yt_dlp
 from PIL import Image
 
 from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeVideo
+from telethon.errors import MediaCaptionTooLongError
 from helpers.sys_info import make_progress_bar, format_duration
 from helpers.uploader import upload_file_server_with_progress
 
 logger = logging.getLogger("AkashaUserbot.YouTube")
 
 TEMP_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "temp_media")
+
+
+def build_caption(header_title: str, prefix_icon: str, footer_info: str, max_total: int = 1000) -> str:
+    """
+    Bangun caption Telegram dengan membatasi panjang total <= max_total (default 1000).
+    Jika terlalu panjang, judul dipotong rapi dengan tanda '...' agar tidak melebihi limit 1024 karakter Telegram.
+    """
+    base_overhead = len(prefix_icon) + len(footer_info) + 12
+    available_title_len = max(30, max_total - base_overhead)
+
+    clean_title = (header_title or "").strip()
+    if len(clean_title) > available_title_len:
+        clean_title = clean_title[:available_title_len - 3].strip() + "..."
+
+    caption = f"{prefix_icon} **{clean_title}**\n\n{footer_info}".strip()
+    if len(caption) > 1024:
+        caption = caption[:1020] + "..."
+    return caption
 
 YOUTUBE_REGEX = re.compile(
     r'(https?://(?:(?:www|m|music)\.)?(?:youtube\.com/(?:watch\?[^\s]+|shorts/[^\s]+|live/[^\s]+|v/[^\s]+)|youtu\.be/[^\s]+))',
@@ -325,31 +344,50 @@ async def handle(event, client, txt, t_l):
                 )
                 return True
 
-            caption = (
-                f"🎵 **[{title}]({webpage_url})**\n\n"
+            footer = (
                 f"👤 **Artis / Channel:** `{channel}`\n"
                 f"⏱ **Durasi:** `{format_duration(duration)}`\n"
                 f"📦 **Ukuran:** `{f_size_mb:.1f} MB`"
             )
+            caption = build_caption(f"[{title}]({webpage_url})", "🎵", footer)
 
             await event.edit("📤 **Mengunggah audio ke Telegram...**")
-            await client.send_file(
-                event.chat_id,
-                mp3_file,
-                caption=caption,
-                thumb=thumb_path,
-                voice_note=False,
-                attributes=[
-                    DocumentAttributeAudio(
-                        duration=int(duration),
-                        voice=False,
-                        title=title,
-                        performer=channel
-                    )
-                ],
-                reply_to=reply_to_id,
-                progress_callback=make_upload_progress(event, "📤 **Mengunggah audio ke Telegram...**")
-            )
+            try:
+                await client.send_file(
+                    event.chat_id,
+                    mp3_file,
+                    caption=caption,
+                    thumb=thumb_path,
+                    voice_note=False,
+                    attributes=[
+                        DocumentAttributeAudio(
+                            duration=int(duration),
+                            voice=False,
+                            title=title,
+                            performer=channel
+                        )
+                    ],
+                    reply_to=reply_to_id,
+                    progress_callback=make_upload_progress(event, "📤 **Mengunggah audio ke Telegram...**")
+                )
+            except MediaCaptionTooLongError:
+                short_cap = caption[:800] + "..."
+                await client.send_file(
+                    event.chat_id,
+                    mp3_file,
+                    caption=short_cap,
+                    thumb=thumb_path,
+                    voice_note=False,
+                    attributes=[
+                        DocumentAttributeAudio(
+                            duration=int(duration),
+                            voice=False,
+                            title=title,
+                            performer=channel
+                        )
+                    ],
+                    reply_to=reply_to_id
+                )
             await event.delete()
             return True
 
@@ -440,31 +478,42 @@ async def handle(event, client, txt, t_l):
             return True
 
         view_str = f" • 👁 `{views:,} views`" if views else ""
-        caption = (
-            f"🎬 **[{title}]({webpage_url})**\n\n"
+        footer = (
             f"👤 **Channel:** `{channel}`\n"
             f"⏱ **Durasi:** `{format_duration(duration)}`{view_str}\n"
             f"📦 **Ukuran:** `{f_size_mb:.1f} MB`"
         )
+        caption = build_caption(f"[{title}]({webpage_url})", "🎬", footer)
 
         await event.edit("📤 **Mengunggah video ke Telegram...**")
-        await client.send_file(
-            event.chat_id,
-            video_file,
-            caption=caption,
-            thumb=thumb_path,
-            supports_streaming=True,
-            attributes=[
-                DocumentAttributeVideo(
-                    duration=int(duration),
-                    w=int(width),
-                    h=int(height),
-                    supports_streaming=True
-                )
-            ],
-            reply_to=reply_to_id,
-            progress_callback=make_upload_progress(event, "📤 **Mengunggah video ke Telegram...**")
-        )
+        try:
+            await client.send_file(
+                event.chat_id,
+                video_file,
+                caption=caption,
+                thumb=thumb_path,
+                supports_streaming=True,
+                attributes=[
+                    DocumentAttributeVideo(
+                        duration=int(duration),
+                        w=int(width),
+                        h=int(height),
+                        supports_streaming=True
+                    )
+                ],
+                reply_to=reply_to_id,
+                progress_callback=make_upload_progress(event, "📤 **Mengunggah video ke Telegram...**")
+            )
+        except MediaCaptionTooLongError:
+            short_cap = caption[:800] + "..."
+            await client.send_file(
+                event.chat_id,
+                video_file,
+                caption=short_cap,
+                thumb=thumb_path,
+                supports_streaming=True,
+                reply_to=reply_to_id
+            )
         await event.delete()
         return True
 
