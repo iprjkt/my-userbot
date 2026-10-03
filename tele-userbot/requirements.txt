@@ -17,6 +17,8 @@ Pillow
 
 # Video & Media Downloaders (YouTube, TikTok)
 yt-dlp
+yt-dlp-get-pot
+yt-dlp-get-pot-rustypipe
 
 # Text Art & Fonts
 pyfiglet

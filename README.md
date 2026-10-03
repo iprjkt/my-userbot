@@ -67,16 +67,24 @@ api_hash=0123456789abcdef0123456789abcdef
 
 ---
 
-### 4. (Opsional) Cookies YouTube untuk Bypass Bot Check
+### 4. Bypass Bot Verification YouTube (PO Token & Cookies)
 
-Jika IP VPS terkena deteksi bot YouTube (*Sign in to confirm you're not a bot*):
-1. Buka browser tempat Anda login akun YouTube.
-2. Gunakan ekstensi browser seperti **Get cookies.txt LOCALLY**.
-3. Ekspor cookies dalam format Netscape dan simpan file tersebut di folder userbot:
-   ```text
-   tele-userbot/cookies.txt
-   ```
-4. Userbot akan otomatis mendeteksi dan menggunakan file tersebut untuk membuka resolusi tertinggi (1080p/4K) dan video age-restricted.
+YouTube menerapkan proteksi ketat (*Proof of Origin / PO Token*) terhadap IP VPS / Datacenter:
+
+1. **Auto PO Token (Sudah Terpasang & Otomatis Aktif):**
+   - Userbot sudah terintegrasi dengan plugin `yt-dlp-get-pot-rustypipe` dan binary `rustypipe-botguard` di `~/.local/bin`.
+   - Plugin ini otomatis menghasilkan PO Token yang valid setiap kali mengambil data video/audio, sehingga IP VPS tidak dicegat verifikasi bot.
+   - *(Catatan instalasi baru jika pindah VPS)*:
+     ```bash
+     curl -sL "https://codeberg.org/ThetaDev/rustypipe-botguard/releases/download/v0.1.2/rustypipe-botguard-v0.1.2-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C ~/.local/bin/
+     chmod +x ~/.local/bin/rustypipe-botguard
+     ```
+
+2. **(Opsional) Cookies YouTube untuk Video Age-Restricted / Login:**
+   - Untuk video yang mewajibkan login akun (konten 18+, private, atau channel membership):
+   - Buka browser tempat Anda login YouTube, ekspor format Netscape dengan ekstensi seperti **Get cookies.txt LOCALLY**.
+   - Simpan file sebagai `cookies.txt` di dalam folder `tele-userbot/`.
+   - Userbot akan otomatis mendeteksi cookies tersebut saat dibutuhkan.
 
 ---
 

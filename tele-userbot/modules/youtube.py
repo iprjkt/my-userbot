@@ -47,6 +47,13 @@ YOUTUBE_REGEX = re.compile(
 )
 
 
+# Pastikan ~/.local/bin masuk PATH agar binary rustypipe-botguard selalu terbaca oleh yt-dlp
+_home = os.path.expanduser("~")
+_local_bin = os.path.join(_home, ".local", "bin")
+if _local_bin not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = f"{_local_bin}:{os.environ.get('PATH', '')}"
+
+
 def get_cookie_file() -> str | None:
     """Cari file cookies.txt jika disediakan oleh pengguna untuk bypass bot verification."""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -62,18 +69,16 @@ def get_cookie_file() -> str | None:
     return None
 
 
-def get_base_ydl_opts(use_android_only: bool = False) -> dict:
+def get_base_ydl_opts(use_fallback: bool = False, use_android_only: bool = False) -> dict:
     """Konfigurasi dasar yt-dlp dengan extractor_args untuk bypass bot verification."""
     cookie_file = get_cookie_file()
 
-    # Jika ada cookies, web client aman digunakan untuk kualitas penuh.
-    # Jika tidak ada cookies, prioritaskan client android & ios untuk menghindari bot detection.
-    if cookie_file:
-        clients = ["web", "android", "ios"]
-    elif use_android_only:
-        clients = ["android"]
+    # Kombinasi client web, mweb, dan android didukung oleh auto-generator PO Token
+    # (rustypipe-botguard plugin) untuk bypass verifikasi bot YouTube di VPS/Cloud IP.
+    if use_fallback or use_android_only:
+        clients = ["mweb", "android"]
     else:
-        clients = ["android", "ios", "web"]
+        clients = ["web", "mweb", "android"]
 
     opts = {
         "extractor_args": {
@@ -292,8 +297,8 @@ async def handle(event, client, txt, t_l):
             except Exception as e:
                 err_text = str(e).lower()
                 if "sign in" in err_text or "bot" in err_text:
-                    await event.edit("⏳ **Mencoba bypass bot verification (Android client)...**")
-                    fallback_opts = get_base_ydl_opts(use_android_only=True)
+                    await event.edit("⏳ **Mencoba bypass bot verification (MWeb/Android client)...**")
+                    fallback_opts = get_base_ydl_opts(use_fallback=True)
                     fallback_opts.update({
                         "format": "bestaudio/best",
                         "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
@@ -418,8 +423,8 @@ async def handle(event, client, txt, t_l):
         except Exception as e:
             err_text = str(e).lower()
             if "sign in" in err_text or "bot" in err_text:
-                await event.edit("⏳ **Mencoba bypass bot verification (Android client)...**")
-                fallback_opts = get_base_ydl_opts(use_android_only=True)
+                await event.edit("⏳ **Mencoba bypass bot verification (MWeb/Android client)...**")
+                fallback_opts = get_base_ydl_opts(use_fallback=True)
                 fallback_opts.update({
                     "format": f"bestvideo*[height<={max_height}]+bestaudio/best[height<={max_height}]/best",
                     "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
@@ -523,11 +528,11 @@ async def handle(event, client, txt, t_l):
         if "sign in" in err_str.lower() or "bot" in err_str.lower():
             await event.edit(
                 "❌ **YouTube Bot Verification Terdeteksi!**\n\n"
-                "YouTube memblokir request dari IP VPS ini untuk video tersebut.\n\n"
-                "💡 **Solusi Ampuh:**\n"
-                "1. Ekspor cookies YouTube dari browser Anda (format Netscape `cookies.txt`).\n"
-                "2. Simpan file tersebut dengan nama `cookies.txt` di folder utama userbot.\n"
-                "Bot akan otomatis membaca cookies tersebut dan bebas dari limit bot!"
+                "YouTube membatasi request untuk video ini karena proteksi bot/age-restriction.\n\n"
+                "💡 **Tips Penanganan:**\n"
+                "1. Bot sudah memakai bypass PO Token (`rustypipe-botguard`).\n"
+                "2. Jika video memerlukan login (private/age-restricted), letakkan file Netscape `cookies.txt` di folder utama userbot.\n"
+                "3. Jika IP VPS sedang di-throttle ketat oleh YouTube, tunggu 1-2 menit lalu coba lagi."
             )
         else:
             await event.edit(f"❌ **Error YouTube:**\n`{err_str}`")
