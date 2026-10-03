@@ -54,6 +54,33 @@ if _local_bin not in os.environ.get("PATH", ""):
     os.environ["PATH"] = f"{_local_bin}:{os.environ.get('PATH', '')}"
 
 
+def ensure_rustypipe_binary():
+    """Auto-download binary rustypipe-botguard jika belum terpasang di sistem."""
+    try:
+        binary_path = os.path.join(_local_bin, "rustypipe-botguard")
+        if os.path.exists(binary_path):
+            return
+        if os.uname().machine == "x86_64" and sys.platform.startswith("linux"):
+            os.makedirs(_local_bin, exist_ok=True)
+            import urllib.request, tarfile, tempfile
+            url = "https://codeberg.org/ThetaDev/rustypipe-botguard/releases/download/v0.1.2/rustypipe-botguard-v0.1.2-x86_64-unknown-linux-gnu.tar.xz"
+            with tempfile.NamedTemporaryFile(suffix=".tar.xz", delete=False) as tmp:
+                urllib.request.urlretrieve(url, tmp.name)
+                with tarfile.open(tmp.name, "r:xz") as tar:
+                    tar.extractall(_local_bin)
+                os.chmod(binary_path, 0o755)
+                try:
+                    os.remove(tmp.name)
+                except Exception:
+                    pass
+            logger.info("rustypipe-botguard berhasil diunduh otomatis ke %s", binary_path)
+    except Exception as e:
+        logger.debug("Auto-download rustypipe-botguard diskip: %s", e)
+
+# Jalankan pengecekan binary di background
+ensure_rustypipe_binary()
+
+
 def get_cookie_file() -> str | None:
     """Cari file cookies.txt jika disediakan oleh pengguna untuk bypass bot verification."""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,13 +96,22 @@ def get_cookie_file() -> str | None:
     return None
 
 
-def get_base_ydl_opts(use_fallback: bool = False, use_android_only: bool = False) -> dict:
-    """Konfigurasi dasar yt-dlp dengan extractor_args untuk bypass bot verification."""
+def get_base_ydl_opts(tier: int = 0, use_fallback: bool = False, use_android_only: bool = False) -> dict:
+    """
+    Konfigurasi dasar yt-dlp dengan extractor_args untuk bypass bot verification.
+    Tier 0: default VisionOS / iOS tanpa android_sdkless (Bypass paling stabil di VPS).
+    Tier 1: mweb + android (alternatif mobile player).
+    Tier 2: web + mweb + android (dengan dukungan PO Token rustypipe-botguard).
+    """
     cookie_file = get_cookie_file()
 
-    # Kombinasi client web, mweb, dan android didukung oleh auto-generator PO Token
-    # (rustypipe-botguard plugin) untuk bypass verifikasi bot YouTube di VPS/Cloud IP.
     if use_fallback or use_android_only:
+        clients = ["mweb", "android"]
+    elif tier == 0:
+        # Tier 0: Menggunakan default VisionOS/iOS extractor dan menonaktifkan android_sdkless
+        # yang sering diblokir bot detection YouTube di VPS/Cloud IP.
+        clients = ["default", "-android_sdkless"]
+    elif tier == 1:
         clients = ["mweb", "android"]
     else:
         clients = ["web", "mweb", "android"]
@@ -91,6 +127,11 @@ def get_base_ydl_opts(use_fallback: bool = False, use_android_only: bool = False
     }
     if cookie_file:
         opts["cookiefile"] = cookie_file
+
+    proxy = os.getenv("YT_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+    if proxy:
+        opts["proxy"] = proxy
+
     return opts
 
 
@@ -275,44 +316,36 @@ async def handle(event, client, txt, t_l):
         if is_audio_cmd:
             await event.edit("🔍 **Mengambil info audio YouTube...**")
 
-            ydl_opts = get_base_ydl_opts()
-            ydl_opts.update({
-                "format": "bestaudio/best",
-                "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }],
-                "writethumbnail": True,
-                "progress_hooks": [_progress_hook],
-            })
-
             def _dl_audio(opts):
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     return ydl.extract_info(target_url, download=True)
 
-            try:
-                info = await asyncio.to_thread(_dl_audio, ydl_opts)
-            except Exception as e:
-                err_text = str(e).lower()
-                if "sign in" in err_text or "bot" in err_text:
-                    await event.edit("⏳ **Mencoba bypass bot verification (MWeb/Android client)...**")
-                    fallback_opts = get_base_ydl_opts(use_fallback=True)
-                    fallback_opts.update({
-                        "format": "bestaudio/best",
-                        "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
-                        "postprocessors": [{
-                            "key": "FFmpegExtractAudio",
-                            "preferredcodec": "mp3",
-                            "preferredquality": "192",
-                        }],
-                        "writethumbnail": True,
-                        "progress_hooks": [_progress_hook],
-                    })
-                    info = await asyncio.to_thread(_dl_audio, fallback_opts)
-                else:
-                    raise
+            tiers = [0, 1, 2]
+            info = None
+            last_err = None
+            for tier_idx in tiers:
+                ydl_opts = get_base_ydl_opts(tier=tier_idx)
+                ydl_opts.update({
+                    "format": "bestaudio/best",
+                    "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
+                    "postprocessors": [{
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }],
+                    "writethumbnail": True,
+                    "progress_hooks": [_progress_hook],
+                })
+                try:
+                    info = await asyncio.to_thread(_dl_audio, ydl_opts)
+                    break
+                except Exception as e:
+                    last_err = e
+                    err_text = str(e).lower()
+                    if ("sign in" in err_text or "bot" in err_text or "403" in err_text or "not available" in err_text) and tier_idx < len(tiers) - 1:
+                        await event.edit(f"⏳ **Mencoba metode bypass alternatif (metode {tier_idx + 2})...**")
+                        continue
+                    raise last_err
 
             title = info.get("title", "YouTube Audio")
             channel = info.get("uploader") or info.get("channel") or "Unknown Artist"
@@ -405,36 +438,35 @@ async def handle(event, client, txt, t_l):
             f"bestvideo*[height<={max_height}]+bestaudio/best"
         )
 
-        ydl_opts = get_base_ydl_opts()
-        ydl_opts.update({
-            "format": format_str,
-            "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
-            "merge_output_format": "mp4",
-            "writethumbnail": True,
-            "progress_hooks": [_progress_hook],
-        })
-
         def _dl_video(opts):
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(target_url, download=True)
 
-        try:
-            info = await asyncio.to_thread(_dl_video, ydl_opts)
-        except Exception as e:
-            err_text = str(e).lower()
-            if "sign in" in err_text or "bot" in err_text:
-                await event.edit("⏳ **Mencoba bypass bot verification (MWeb/Android client)...**")
-                fallback_opts = get_base_ydl_opts(use_fallback=True)
-                fallback_opts.update({
-                    "format": f"bestvideo*[height<={max_height}]+bestaudio/best[height<={max_height}]/best",
-                    "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
-                    "merge_output_format": "mp4",
-                    "writethumbnail": True,
-                    "progress_hooks": [_progress_hook],
-                })
-                info = await asyncio.to_thread(_dl_video, fallback_opts)
-            else:
-                raise
+        tiers = [0, 1, 2]
+        info = None
+        last_err = None
+        for tier_idx in tiers:
+            ydl_opts = get_base_ydl_opts(tier=tier_idx)
+            current_format = format_str
+            if tier_idx > 0:
+                current_format = f"bestvideo*[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
+            ydl_opts.update({
+                "format": current_format,
+                "outtmpl": os.path.join(task_dir, "%(id)s.%(ext)s"),
+                "merge_output_format": "mp4",
+                "writethumbnail": True,
+                "progress_hooks": [_progress_hook],
+            })
+            try:
+                info = await asyncio.to_thread(_dl_video, ydl_opts)
+                break
+            except Exception as e:
+                last_err = e
+                err_text = str(e).lower()
+                if ("sign in" in err_text or "bot" in err_text or "403" in err_text or "not available" in err_text) and tier_idx < len(tiers) - 1:
+                    await event.edit(f"⏳ **Mencoba metode bypass alternatif (metode {tier_idx + 2})...**")
+                    continue
+                raise last_err
 
         title = info.get("title", "YouTube Video")
         channel = info.get("uploader") or info.get("channel") or "Unknown Channel"

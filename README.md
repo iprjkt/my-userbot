@@ -67,24 +67,26 @@ api_hash=0123456789abcdef0123456789abcdef
 
 ---
 
-### 4. Bypass Bot Verification YouTube (PO Token & Cookies)
+### 4. Bypass Bot Verification YouTube (Multi-Tier Bypass & PO Token)
 
-YouTube menerapkan proteksi ketat (*Proof of Origin / PO Token*) terhadap IP VPS / Datacenter:
+YouTube menerapkan proteksi anti-bot ketat terhadap IP VPS / Datacenter. Userbot ini sudah dilengkapi sistem **Multi-Tier Auto Bypass**:
 
-1. **Auto PO Token (Sudah Terpasang & Otomatis Aktif):**
-   - Userbot sudah terintegrasi dengan plugin `yt-dlp-get-pot-rustypipe` dan binary `rustypipe-botguard` di `~/.local/bin`.
-   - Plugin ini otomatis menghasilkan PO Token yang valid setiap kali mengambil data video/audio, sehingga IP VPS tidak dicegat verifikasi bot.
-   - *(Catatan instalasi baru jika pindah VPS)*:
-     ```bash
-     curl -sL "https://codeberg.org/ThetaDev/rustypipe-botguard/releases/download/v0.1.2/rustypipe-botguard-v0.1.2-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C ~/.local/bin/
-     chmod +x ~/.local/bin/rustypipe-botguard
+1. **Tier 0 (Default - VisionOS/iOS Extractor):**
+   - Menggunakan client modern dengan parameter `-android_sdkless` yang tidak dicegat verifikasi bot YouTube dan bebas dari SABR streaming block.
+2. **Tier 1 (Fallback - MWeb / Android):**
+   - Jika Tier 0 gagal, bot otomatis mencoba endpoint mobile.
+3. **Tier 2 (Fallback - PO Token rustypipe-botguard):**
+   - Jika dibutuhkan, binary `rustypipe-botguard` akan diunduh secara otomatis oleh bot ke `~/.local/bin/` untuk menghasilkan Proof of Origin Token (PO Token).
+4. **(Opsional) Proxy / Residential IP:**
+   - Jika IP VPS Anda diblokir total oleh Google/YouTube, tambahkan proxy di file `.env`:
+     ```env
+     YT_PROXY=http://username:password@ip_proxy:port
+     # atau socks5://ip_proxy:port
      ```
-
-2. **(Opsional) Cookies YouTube untuk Video Age-Restricted / Login:**
-   - Untuk video yang mewajibkan login akun (konten 18+, private, atau channel membership):
-   - Buka browser tempat Anda login YouTube, ekspor format Netscape dengan ekstensi seperti **Get cookies.txt LOCALLY**.
+5. **(Opsional) Cookies YouTube untuk Video Age-Restricted:**
+   - Untuk video yang mewajibkan login akun (konten 18+, private, atau membership):
+   - Ekspor format Netscape dari browser dengan ekstensi **Get cookies.txt LOCALLY**.
    - Simpan file sebagai `cookies.txt` di dalam folder `tele-userbot/`.
-   - Userbot akan otomatis mendeteksi cookies tersebut saat dibutuhkan.
 
 ---
 
